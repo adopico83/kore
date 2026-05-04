@@ -1,6 +1,7 @@
 "use client";
 
 import { AgentChat } from "@/components/AgentChat/AgentChat";
+import { CorchoChat } from "@/components/CorchoChat";
 import {
   CalendarModal,
   type KoreAgendaEvent,
@@ -190,6 +191,7 @@ const EXPENSES = [
 
 export default function Home() {
   const [showAgent, setShowAgent] = useState(false);
+  const [showCorcho, setShowCorcho] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>([]);
@@ -1159,6 +1161,10 @@ export default function Home() {
       >
         <button
           type="button"
+          onClick={() => {
+            setShowAgent(false);
+            setShowCorcho(true);
+          }}
           aria-label="Mensaje a Leire"
           style={{
             width: 52,
@@ -1179,7 +1185,10 @@ export default function Home() {
         </button>
         <button
           type="button"
-          onClick={() => setShowAgent(true)}
+          onClick={() => {
+            setShowCorcho(false);
+            setShowAgent(true);
+          }}
           aria-label="ORC / Agente"
           style={{
             width: 66,
@@ -1201,6 +1210,7 @@ export default function Home() {
         </button>
       </nav>
 
+      {showCorcho ? <CorchoChat onClose={() => setShowCorcho(false)} /> : null}
       {showAgent ? <AgentChat onClose={() => setShowAgent(false)} /> : null}
 
       {showCalendar ? (
