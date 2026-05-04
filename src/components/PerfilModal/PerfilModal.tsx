@@ -46,14 +46,14 @@ const LS_KORE_DOMAINS_STATE = "kore_domains_state";
 const LS_KORE_SALUD = "kore_salud";
 
 function stressBarColor(level: number): string {
-  if (level <= 4) return "#4CC9A0";
-  if (level <= 7) return "#EF9F27";
+  if (level >= 8) return "#4CC9A0";
+  if (level >= 4) return "#EF9F27";
   return "#E05555";
 }
 
 function stressAvatarBorder(level: number): string {
-  if (level <= 4) return "#10b981";
-  if (level <= 7) return "#f59e0b";
+  if (level >= 8) return "#10b981";
+  if (level >= 4) return "#f59e0b";
   return "#E05555";
 }
 
@@ -339,8 +339,8 @@ export function PerfilModal({
                   fontFamily: "ui-monospace, monospace",
                   fontSize: 15,
                   fontWeight: 700,
-                  color: stress >= 5 ? TEXT : "#0a1a14",
-                  textShadow: stress >= 5 ? "0 1px 2px rgba(0,0,0,0.5)" : "none",
+                  color: stress >= 8 ? "#0a1a14" : TEXT,
+                  textShadow: stress >= 8 ? "none" : "0 1px 2px rgba(0,0,0,0.5)",
                   pointerEvents: "none",
                 }}
               >

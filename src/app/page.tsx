@@ -34,15 +34,21 @@ function readStressFromLs(key: string): number {
 }
 
 function avatarStressBorder(level: number): string {
-  if (level <= 4) return "#10b981";
-  if (level <= 7) return "#f59e0b";
+  if (level >= 8) return "#10b981";
+  if (level >= 4) return "#f59e0b";
   return "#E05555";
 }
 
 function avatarStressShadow(level: number): string {
-  if (level <= 4) return "0 0 12px rgba(16, 185, 129, 0.3)";
-  if (level <= 7) return "0 0 12px rgba(245, 158, 11, 0.3)";
+  if (level >= 8) return "0 0 12px rgba(16, 185, 129, 0.3)";
+  if (level >= 4) return "0 0 12px rgba(245, 158, 11, 0.3)";
   return "0 0 12px rgba(224, 85, 85, 0.35)";
+}
+
+function stressThermometerColor(level: number): string {
+  if (level >= 8) return "#4CC9A0";
+  if (level >= 4) return "#EF9F27";
+  return "#E05555";
 }
 
 function readAgendaFromLs(): KoreAgendaEvent[] {
@@ -1378,7 +1384,7 @@ export default function Home() {
                   style={{
                     height: "100%",
                     borderRadius: 999,
-                    background: C.green,
+                    background: stressThermometerColor(anderStress),
                     width: `${(anderStress / 10) * 100}%`,
                   }}
                 />
@@ -1425,7 +1431,7 @@ export default function Home() {
                   style={{
                     height: "100%",
                     borderRadius: 999,
-                    background: C.purple,
+                    background: stressThermometerColor(leireStress),
                     width: `${(leireStress / 10) * 100}%`,
                   }}
                 />

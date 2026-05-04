@@ -61,6 +61,21 @@ export type SaludModalProps = {
 export function SaludModal({ onClose, onChange }: SaludModalProps) {
   const [data, setData] = useState<SaludData>(() => readSalud());
   const [openMember, setOpenMember] = useState<Member>("Peque");
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editCitaDraft, setEditCitaDraft] = useState<Cita>({
+    id: "",
+    descripcion: "",
+    fecha: "",
+    hora: "",
+    lugar: "",
+  });
+  const [editMedDraft, setEditMedDraft] = useState<Medicacion>({
+    id: "",
+    nombre: "",
+    dosis: "",
+    frecuenciaHoras: 8,
+    proximaToma: "",
+  });
   const [tipo, setTipo] = useState<"cita" | "medicacion">("cita");
   const [miembro, setMiembro] = useState<Member>("Peque");
   const [descripcion, setDescripcion] = useState("");
@@ -131,6 +146,53 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
     update(next);
   };
 
+  const startEditCita = (member: Member, cita: Cita) => {
+    setEditingKey(`cita:${member}:${cita.id}`);
+    setEditCitaDraft(cita);
+  };
+
+  const startEditMed = (member: Member, med: Medicacion) => {
+    setEditingKey(`med:${member}:${med.id}`);
+    setEditMedDraft(med);
+  };
+
+  const saveEditCita = (member: Member, id: string) => {
+    if (!editCitaDraft.descripcion.trim() || !editCitaDraft.fecha || !editCitaDraft.hora) return;
+    const next = structuredClone(data);
+    next[member].citas = next[member].citas.map((c) =>
+      c.id === id
+        ? {
+            ...c,
+            descripcion: editCitaDraft.descripcion.trim(),
+            fecha: editCitaDraft.fecha,
+            hora: editCitaDraft.hora,
+            lugar: editCitaDraft.lugar.trim(),
+          }
+        : c,
+    );
+    update(next);
+    setEditingKey(null);
+  };
+
+  const saveEditMed = (member: Member, id: string) => {
+    const freq = Number(editMedDraft.frecuenciaHoras);
+    if (!editMedDraft.nombre.trim() || !editMedDraft.dosis.trim() || Number.isNaN(freq) || freq <= 0 || !editMedDraft.proximaToma) return;
+    const next = structuredClone(data);
+    next[member].medicaciones = next[member].medicaciones.map((m) =>
+      m.id === id
+        ? {
+            ...m,
+            nombre: editMedDraft.nombre.trim(),
+            dosis: editMedDraft.dosis.trim(),
+            frecuenciaHoras: freq,
+            proximaToma: editMedDraft.proximaToma,
+          }
+        : m,
+    );
+    update(next);
+    setEditingKey(null);
+  };
+
   return (
     <div role="dialog" aria-modal="true" aria-label="Salud Familiar" style={{ position: "fixed", inset: 0, zIndex: 8200, background: "#090b10", color: "#e4e6ed", display: "flex", flexDirection: "column" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: 12, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
@@ -140,7 +202,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
         </button>
       </header>
 
-      <main style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+      <main style={{ flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
         <section style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "#161a22", padding: 12 }}>
           <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Pendientes totales</p>
           <p style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{totalPendientes}</p>
@@ -148,41 +210,96 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
 
         {(["Peque", "Ander", "Leire"] as const).map((member) => {
           const sectionOpen = openMember === member;
+          const memberColor = member === "Peque" ? "#4CC9A0" : member === "Ander" ? "#2CB1A3" : "#EF9F27";
           return (
             <section key={member} style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "#161a22", overflow: "hidden" }}>
               <button type="button" onClick={() => setOpenMember(sectionOpen ? "Peque" : member)} style={{ width: "100%", border: "none", background: "transparent", color: "#e4e6ed", padding: "10px 12px", display: "flex", justifyContent: "space-between", cursor: "pointer" }}>
-                <span style={{ fontWeight: 700 }}>{member}</span>
+                <span style={{ fontWeight: 700, fontSize: 14, color: memberColor }}>{member}</span>
                 <span style={{ color: "rgba(228,230,237,0.65)" }}>{sectionOpen ? "▼" : "▶"}</span>
               </button>
               {sectionOpen ? (
                 <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                   <div>
                     <p style={{ margin: "0 0 6px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Citas</p>
-                    <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
-                      {data[member].citas.map((c) => (
-                        <li key={c.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", padding: "8px 9px", display: "flex", justifyContent: "space-between", gap: 8 }}>
-                          <div style={{ minWidth: 0 }}>
-                            <p style={{ margin: 0, fontSize: 13 }}>{c.descripcion}</p>
-                            <p style={{ margin: "4px 0 0", fontSize: 11, color: "rgba(228,230,237,0.65)" }}>{c.fecha} {c.hora} · {c.lugar || "Sin lugar"}</p>
-                          </div>
-                          <button type="button" onClick={() => removeCita(member, c.id)} style={{ border: "none", background: "transparent", color: "rgba(228,230,237,0.65)", cursor: "pointer" }}>✕</button>
-                        </li>
-                      ))}
-                    </ul>
+                    {data[member].citas.length === 0 ? (
+                      <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.65)" }}>Sin citas</p>
+                    ) : (
+                      <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                        {data[member].citas.map((c) => {
+                          const key = `cita:${member}:${c.id}`;
+                          const isEditing = editingKey === key;
+                          return (
+                            <li key={c.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8 }}>
+                              {isEditing ? (
+                                <div style={{ display: "grid", gap: 8 }}>
+                                  <input value={editCitaDraft.descripcion} onChange={(e) => setEditCitaDraft((d) => ({ ...d, descripcion: e.target.value }))} placeholder="Descripción" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                  <div style={{ display: "flex", gap: 8 }}>
+                                    <input type="date" value={editCitaDraft.fecha} onChange={(e) => setEditCitaDraft((d) => ({ ...d, fecha: e.target.value }))} style={{ flex: 1, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                    <input type="time" value={editCitaDraft.hora} onChange={(e) => setEditCitaDraft((d) => ({ ...d, hora: e.target.value }))} style={{ flex: 1, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                  </div>
+                                  <input value={editCitaDraft.lugar} onChange={(e) => setEditCitaDraft((d) => ({ ...d, lugar: e.target.value }))} placeholder="Lugar" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                  <div style={{ display: "flex", gap: 8 }}>
+                                    <button type="button" onClick={() => saveEditCita(member, c.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Guardar</button>
+                                    <button type="button" onClick={() => setEditingKey(null)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div style={{ minWidth: 0 }}>
+                                    <p style={{ margin: 0, fontSize: 13 }}>{c.descripcion}</p>
+                                    <p style={{ margin: "6px 0 0", fontSize: 13, color: "rgba(228,230,237,0.72)" }}>{c.fecha} {c.hora} · {c.lugar || "Sin lugar"}</p>
+                                  </div>
+                                  <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                                    <button type="button" onClick={() => startEditCita(member, c)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Editar</button>
+                                    <button type="button" onClick={() => removeCita(member, c.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "rgba(228,230,237,0.75)", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Eliminar</button>
+                                  </div>
+                                </>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </div>
                   <div>
                     <p style={{ margin: "0 0 6px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Medicaciones activas</p>
-                    <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
-                      {data[member].medicaciones.map((m) => (
-                        <li key={m.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", padding: "8px 9px", display: "flex", justifyContent: "space-between", gap: 8 }}>
-                          <div style={{ minWidth: 0 }}>
-                            <p style={{ margin: 0, fontSize: 13 }}>{m.nombre} · {m.dosis}</p>
-                            <p style={{ margin: "4px 0 0", fontSize: 11, color: "rgba(228,230,237,0.65)" }}>Cada {m.frecuenciaHoras}h · Próxima: {m.proximaToma}</p>
-                          </div>
-                          <button type="button" onClick={() => removeMed(member, m.id)} style={{ border: "none", background: "transparent", color: "rgba(228,230,237,0.65)", cursor: "pointer" }}>✕</button>
-                        </li>
-                      ))}
-                    </ul>
+                    {data[member].medicaciones.length === 0 ? (
+                      <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.65)" }}>Sin medicaciones</p>
+                    ) : (
+                      <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                        {data[member].medicaciones.map((m) => {
+                          const key = `med:${member}:${m.id}`;
+                          const isEditing = editingKey === key;
+                          return (
+                            <li key={m.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8 }}>
+                              {isEditing ? (
+                                <div style={{ display: "grid", gap: 8 }}>
+                                  <input value={editMedDraft.nombre} onChange={(e) => setEditMedDraft((d) => ({ ...d, nombre: e.target.value }))} placeholder="Nombre" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                  <input value={editMedDraft.dosis} onChange={(e) => setEditMedDraft((d) => ({ ...d, dosis: e.target.value }))} placeholder="Dosis" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                  <input value={String(editMedDraft.frecuenciaHoras)} onChange={(e) => setEditMedDraft((d) => ({ ...d, frecuenciaHoras: Number(e.target.value) || d.frecuenciaHoras }))} inputMode="numeric" placeholder="Frecuencia (horas)" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                  <input type="datetime-local" value={editMedDraft.proximaToma} onChange={(e) => setEditMedDraft((d) => ({ ...d, proximaToma: e.target.value }))} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                  <div style={{ display: "flex", gap: 8 }}>
+                                    <button type="button" onClick={() => saveEditMed(member, m.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Guardar</button>
+                                    <button type="button" onClick={() => setEditingKey(null)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div style={{ minWidth: 0 }}>
+                                    <p style={{ margin: 0, fontSize: 13 }}>{m.nombre} · {m.dosis}</p>
+                                    <p style={{ margin: "6px 0 0", fontSize: 13, color: "rgba(228,230,237,0.72)" }}>Cada {m.frecuenciaHoras}h · Próxima: {m.proximaToma}</p>
+                                  </div>
+                                  <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                                    <button type="button" onClick={() => startEditMed(member, m)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Editar</button>
+                                    <button type="button" onClick={() => removeMed(member, m.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "rgba(228,230,237,0.75)", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Eliminar</button>
+                                  </div>
+                                </>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </div>
                 </div>
               ) : null}
@@ -193,28 +310,28 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
         <section style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "#161a22", padding: 12 }}>
           <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Añadir registro</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <select value={tipo} onChange={(e) => setTipo(e.target.value as "cita" | "medicacion")} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#e4e6ed", color: "#111318", padding: "8px 10px" }}>
+            <select value={tipo} onChange={(e) => setTipo(e.target.value as "cita" | "medicacion")} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#e4e6ed", color: "#111318", padding: "10px 12px", fontSize: 16 }}>
               <option value="cita" style={{ color: "#111318", background: "#e4e6ed" }}>Cita</option>
               <option value="medicacion" style={{ color: "#111318", background: "#e4e6ed" }}>Medicación</option>
             </select>
-            <select value={miembro} onChange={(e) => setMiembro(e.target.value as Member)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#e4e6ed", color: "#111318", padding: "8px 10px" }}>
+            <select value={miembro} onChange={(e) => setMiembro(e.target.value as Member)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#e4e6ed", color: "#111318", padding: "10px 12px", fontSize: 16 }}>
               <option value="Peque" style={{ color: "#111318", background: "#e4e6ed" }}>Peque</option>
               <option value="Ander" style={{ color: "#111318", background: "#e4e6ed" }}>Ander</option>
               <option value="Leire" style={{ color: "#111318", background: "#e4e6ed" }}>Leire</option>
             </select>
             {tipo === "cita" ? (
               <>
-                <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Descripción" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
-                <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
-                <input type="time" value={hora} onChange={(e) => setHora(e.target.value)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
-                <input value={lugar} onChange={(e) => setLugar(e.target.value)} placeholder="Lugar" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
+                <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Descripción" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                <input type="time" value={hora} onChange={(e) => setHora(e.target.value)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                <input value={lugar} onChange={(e) => setLugar(e.target.value)} placeholder="Lugar" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
               </>
             ) : (
               <>
-                <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
-                <input value={dosis} onChange={(e) => setDosis(e.target.value)} placeholder="Dosis" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
-                <input value={frecuenciaHoras} onChange={(e) => setFrecuenciaHoras(e.target.value)} inputMode="numeric" placeholder="Frecuencia (horas)" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
-                <input type="datetime-local" value={proximaToma} onChange={(e) => setProximaToma(e.target.value)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "8px 10px" }} />
+                <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                <input value={dosis} onChange={(e) => setDosis(e.target.value)} placeholder="Dosis" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                <input value={frecuenciaHoras} onChange={(e) => setFrecuenciaHoras(e.target.value)} inputMode="numeric" placeholder="Frecuencia (horas)" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                <input type="datetime-local" value={proximaToma} onChange={(e) => setProximaToma(e.target.value)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
               </>
             )}
             <button type="button" onClick={addItem} style={{ borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer" }}>
