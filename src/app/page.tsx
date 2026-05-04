@@ -333,6 +333,7 @@ export default function Home() {
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>([]);
 
   const [domainsOpen, setDomainsOpen] = useState(true);
+  const [domainCardHover, setDomainCardHover] = useState<Record<string, boolean>>({});
   const [domains, setDomains] = useState<DomainCard[]>(DOMAINS);
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
@@ -985,7 +986,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Dominios */}
+        {/* Nuestro hogar (dominios) */}
         <section style={cardShell}>
           <button
             type="button"
@@ -1004,7 +1005,7 @@ export default function Home() {
               color: C.text,
             }}
           >
-            <span style={{ ...sectionLabel, margin: 0 }}>Dominios</span>
+            <span style={{ ...sectionLabel, margin: 0 }}>Nuestro hogar</span>
             <span
               style={{
                 color: C.muted,
@@ -1025,23 +1026,33 @@ export default function Home() {
                   gap: 8,
                 }}
               >
-                {domains.slice(0, 4).map((d) => (
+                {domains.slice(0, 4).map((d) => {
+                  const domHover = domainCardHover[d.name] ?? false;
+                  return (
                   <button
                     key={d.name}
                     type="button"
                     onClick={() => setActiveDomainName(d.name)}
+                    onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
+                    onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
+                    onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
+                    onTouchEnd={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                     style={{
                       position: "relative",
                       overflow: "hidden",
                       background: "#161a22",
                       borderRadius: 14,
                       padding: 12,
-                      border: "0.5px solid rgba(255, 255, 255, 0.07)",
+                      border: domHover
+                        ? "0.5px solid rgba(255, 255, 255, 0.2)"
+                        : "0.5px solid rgba(255, 255, 255, 0.07)",
                       boxSizing: "border-box",
                       textAlign: "left",
                       color: C.text,
                       cursor: "pointer",
                       font: "inherit",
+                      transform: domHover ? "scale(1.03) translateY(-3px)" : "scale(1) translateY(0)",
+                      transition: "all 0.2s ease",
                     }}
                   >
                     <div
@@ -1138,7 +1149,8 @@ export default function Home() {
                       </p>
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
               <div
                 style={{
@@ -1148,24 +1160,34 @@ export default function Home() {
                   marginTop: 8,
                 }}
               >
-                {domains.slice(4).map((d) => (
+                {domains.slice(4).map((d) => {
+                  const domHover = domainCardHover[d.name] ?? false;
+                  return (
                   <button
                     key={d.name}
                     type="button"
                     onClick={() => setActiveDomainName(d.name)}
+                    onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
+                    onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
+                    onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
+                    onTouchEnd={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                     style={{
                       position: "relative",
                       overflow: "hidden",
                       background: "#161a22",
                       borderRadius: 14,
                       padding: 12,
-                      border: "0.5px solid rgba(255, 255, 255, 0.07)",
+                      border: domHover
+                        ? "0.5px solid rgba(255, 255, 255, 0.2)"
+                        : "0.5px solid rgba(255, 255, 255, 0.07)",
                       boxSizing: "border-box",
                       width: "100%",
                       textAlign: "left",
                       color: C.text,
                       cursor: "pointer",
                       font: "inherit",
+                      transform: domHover ? "scale(1.03) translateY(-3px)" : "scale(1) translateY(0)",
+                      transition: "all 0.2s ease",
                     }}
                   >
                     <div
@@ -1262,7 +1284,8 @@ export default function Home() {
                       </p>
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : null}
