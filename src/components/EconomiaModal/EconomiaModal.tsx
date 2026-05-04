@@ -1,7 +1,9 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { addExpense, ANDER_ID, deleteExpense, getExpenses, LEIRE_ID, type Expense } from "@/lib/kore-db";
 
 export const LS_KORE_EXPENSES = "kore_expenses";
 
@@ -48,12 +50,31 @@ function saveExpenses(items: ExpenseItem[]) {
   }
 }
 
+function expenseRowToItem(row: Expense): ExpenseItem {
+  const allowed: ExpenseItem["category"][] = ["comida", "hogar", "salud", "ocio", "transporte", "otros"];
+  const category = (allowed.includes(row.category as ExpenseItem["category"])
+    ? row.category
+    : "otros") as ExpenseItem["category"];
+  return {
+    id: row.id,
+    desc: row.description,
+    amount: row.amount,
+    category,
+    paidBy: row.payer_id === LEIRE_ID ? "Leire" : "Ander",
+    shared: row.is_shared,
+    at: row.created_at,
+  };
+}
+
 export type EconomiaModalProps = {
   onClose: () => void;
   onChange?: (items: ExpenseItem[]) => void;
 };
 
 export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   const [items, setItems] = useState<ExpenseItem[]>(() =>
     readExpenses().sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
   );
@@ -62,6 +83,29 @@ export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
   const [category, setCategory] = useState<ExpenseItem["category"]>("hogar");
   const [paidBy, setPaidBy] = useState<ExpenseItem["paidBy"]>("Ander");
   const [shared, setShared] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await getExpenses();
+        if (cancelled) return;
+        const mapped = rows.map(expenseRowToItem).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+        setItems(mapped);
+        onChangeRef.current?.(mapped);
+        return;
+      } catch {
+        /* Supabase no disponible */
+      }
+      if (cancelled) return;
+      const fallback = readExpenses().sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      setItems(fallback);
+      onChangeRef.current?.(fallback);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const balance = useMemo(() => {
     const now = new Date();
@@ -86,31 +130,45 @@ export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
     };
   }, [items]);
 
-  const updateItems = (next: ExpenseItem[]) => {
+  const updateItemsLocal = (next: ExpenseItem[]) => {
     const sorted = next.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     setItems(sorted);
     saveExpenses(sorted);
     onChange?.(sorted);
   };
 
-  const addItem = () => {
+  const addItem = async () => {
     const cleanDesc = desc.trim();
     const parsedAmount = parseFloat(amount.replace(",", "."));
     if (!cleanDesc) return;
     if (!amount.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0) return;
-    const item: ExpenseItem = {
-      id: crypto.randomUUID?.() ?? `exp_${Date.now()}`,
-      desc: cleanDesc,
-      amount: Math.abs(parsedAmount),
-      category,
-      paidBy,
-      shared,
-      at: new Date().toISOString(),
-    };
-    const next = [item, ...items].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-    setItems(next);
-    saveExpenses(next);
-    onChange?.(next);
+    const payer_id = paidBy === "Leire" ? LEIRE_ID : ANDER_ID;
+    try {
+      const created = await addExpense({
+        payer_id,
+        amount: Math.abs(parsedAmount),
+        category,
+        description: cleanDesc,
+        is_shared: shared,
+        source: "manual",
+      });
+      const item = expenseRowToItem(created);
+      const next = [item, ...items].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      setItems(next);
+      onChange?.(next);
+    } catch {
+      const item: ExpenseItem = {
+        id: crypto.randomUUID?.() ?? `exp_${Date.now()}`,
+        desc: cleanDesc,
+        amount: Math.abs(parsedAmount),
+        category,
+        paidBy,
+        shared,
+        at: new Date().toISOString(),
+      };
+      const next = [item, ...items].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      updateItemsLocal(next);
+    }
     setDesc("");
     setAmount("");
     setCategory("hogar");
@@ -118,8 +176,15 @@ export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
     setShared(true);
   };
 
-  const removeItem = (id: string) => {
-    updateItems(items.filter((it) => it.id !== id));
+  const removeItem = async (id: string) => {
+    try {
+      await deleteExpense(id);
+      const next = items.filter((it) => it.id !== id);
+      setItems(next);
+      onChange?.(next);
+    } catch {
+      updateItemsLocal(items.filter((it) => it.id !== id));
+    }
   };
 
   const card: CSSProperties = {
@@ -190,7 +255,7 @@ export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
             <button type="button" onClick={() => setShared((v) => !v)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: shared ? "rgba(76,201,160,0.2)" : "rgba(255,255,255,0.04)", color: "#e4e6ed", padding: "8px 10px", textAlign: "left", cursor: "pointer" }}>
               {shared ? "Compartido: Sí" : "Compartido: No (personal)"}
             </button>
-            <button type="button" onClick={addItem} style={{ borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer" }}>
+            <button type="button" onClick={() => void addItem()} style={{ borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer" }}>
               Añadir
             </button>
           </div>
@@ -213,7 +278,7 @@ export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
                       Paga: {item.paidBy} · {item.shared ? "Compartido" : "Personal"}
                     </p>
                   </div>
-                  <button type="button" onClick={() => removeItem(item.id)} style={{ border: "none", background: "transparent", color: "rgba(228,230,237,0.65)", cursor: "pointer", flexShrink: 0 }}>
+                  <button type="button" onClick={() => void removeItem(item.id)} style={{ border: "none", background: "transparent", color: "rgba(228,230,237,0.65)", cursor: "pointer", flexShrink: 0 }}>
                     ✕
                   </button>
                 </li>

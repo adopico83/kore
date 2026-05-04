@@ -10,15 +10,43 @@ import { SaludResumenModal } from "@/components/SaludResumenModal";
 import { LS_KORE_SALUD, SaludModal, type SaludData } from "@/components/SaludModal";
 import {
   CalendarModal,
+  type CalendarEventDraft,
+  type CalendarEventUpdateDraft,
   type KoreAgendaEvent,
 } from "@/components/CalendarModal/CalendarModal";
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import type { DomainHistoryEntry } from "@/components/DomainModal";
+import {
+  addCalendarEvent,
+  addDomainHistory,
+  ANDER_ID,
+  deleteCalendarEvent,
+  getCalendarEvents,
+  getDomainHistory,
+  getDomains,
+  getExpenses,
+  getHealthRecords,
+  getProfiles,
+  LEIRE_ID,
+  updateCalendarEvent,
+  updateDomain,
+  updateStressLevel,
+  type CalendarEventRow,
+  type Domain as KoreDomainRow,
+  type Expense,
+} from "@/lib/kore-db";
+import { useKoreRealtime } from "@/lib/kore-realtime";
+import { saludFromHealthRecords } from "@/lib/kore-salud-sync";
 
 const LS_KORE_AGENDA = "kore_calendar_events";
 const LS_KORE_DOMAINS = "kore_domains_state";
 const LS_KORE_STRESS_ANDER = "kore_stress_ander";
 const LS_KORE_STRESS_LEIRE = "kore_stress_leire";
+
+/** Usuario activo (hardcodeado hasta auth). */
+const CURRENT_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 function readStressFromLs(key: string): number {
   if (typeof window === "undefined") return 5;
@@ -255,6 +283,48 @@ function readDomainsFromLs(): DomainCard[] {
   }
 }
 
+function calendarRowToEvent(row: CalendarEventRow): KoreAgendaEvent {
+  return {
+    id: row.id,
+    titulo: row.title,
+    fecha: (row.date ?? "").slice(0, 10),
+    hora: (row.time ?? "").trim() ? row.time : null,
+  };
+}
+
+function mapExpenseRowToItem(row: Expense): ExpenseItem {
+  const allowed: ExpenseItem["category"][] = ["comida", "hogar", "salud", "ocio", "transporte", "otros"];
+  const category = (allowed.includes(row.category as ExpenseItem["category"])
+    ? row.category
+    : "otros") as ExpenseItem["category"];
+  return {
+    id: row.id,
+    desc: row.description,
+    amount: row.amount,
+    category,
+    paidBy: row.payer_id === LEIRE_ID ? "Leire" : "Ander",
+    shared: row.is_shared,
+    at: row.created_at,
+  };
+}
+
+function mergedDomainCard(row: KoreDomainRow): DomainCard {
+  const def = DOMAINS.find((d) => d.name === row.name);
+  const owner =
+    row.owner_id === ANDER_ID ? "Ander" : row.owner_id === LEIRE_ID ? "Leire" : "Sin asignar";
+  return {
+    id: row.id,
+    name: row.name,
+    owner,
+    weight: row.weight,
+    emoji: def?.emoji ?? "📌",
+    state: def?.state ?? "—",
+    line: def?.line ?? "#4CC9A0",
+    agent: row.agent ?? def?.agent,
+    notes: def?.notes ?? [],
+  };
+}
+
 export default function Home() {
   const [showAgent, setShowAgent] = useState(false);
   const [showCorcho, setShowCorcho] = useState(false);
@@ -267,11 +337,11 @@ export default function Home() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>([]);
-  const [agendaHydrated, setAgendaHydrated] = useState(false);
 
   const [domainsOpen, setDomainsOpen] = useState(true);
   const [domains, setDomains] = useState<DomainCard[]>(DOMAINS);
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
+  const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
   const [healthOpen, setHealthOpen] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
   const [salud, setSalud] = useState<SaludData>({
@@ -282,26 +352,119 @@ export default function Home() {
   const [anderStress, setAnderStress] = useState(5);
   const [leireStress, setLeireStress] = useState(5);
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      setAgendaEvents(readAgendaFromLs());
-      setAgendaHydrated(true);
-      setDomains(readDomainsFromLs());
-      setExpenses(readExpensesFromLs());
-      setSalud(readSaludFromLs());
+  const loadProfiles = useCallback(async () => {
+    try {
+      const profiles = await getProfiles();
+      const a = profiles.find((p) => p.id === ANDER_ID);
+      const l = profiles.find((p) => p.id === LEIRE_ID);
+      if (a) setAnderStress(Math.min(10, Math.max(1, Math.round(a.stress_level))));
+      if (l) setLeireStress(Math.min(10, Math.max(1, Math.round(l.stress_level))));
+      try {
+        if (a) localStorage.setItem(LS_KORE_STRESS_ANDER, String(a.stress_level));
+        if (l) localStorage.setItem(LS_KORE_STRESS_LEIRE, String(l.stress_level));
+      } catch {
+        /* ignore */
+      }
+    } catch {
       setAnderStress(readStressFromLs(LS_KORE_STRESS_ANDER));
       setLeireStress(readStressFromLs(LS_KORE_STRESS_LEIRE));
-    });
+    }
+  }, []);
+
+  const loadDomains = useCallback(async () => {
+    try {
+      const rows = await getDomains();
+      const mapped = rows.map(mergedDomainCard);
+      setDomains(mapped);
+      try {
+        localStorage.setItem(LS_KORE_DOMAINS, JSON.stringify(mapped));
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      setDomains(readDomainsFromLs());
+    }
+  }, []);
+
+  const loadAgenda = useCallback(async () => {
+    try {
+      const rows = await getCalendarEvents();
+      const mapped = rows.map(calendarRowToEvent);
+      setAgendaEvents(mapped);
+      try {
+        localStorage.setItem(LS_KORE_AGENDA, JSON.stringify(mapped));
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      setAgendaEvents(readAgendaFromLs());
+    }
+  }, []);
+
+  const loadExpenses = useCallback(async () => {
+    try {
+      const rows = await getExpenses();
+      const mapped = rows.map(mapExpenseRowToItem).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      setExpenses(mapped);
+    } catch {
+      setExpenses(readExpensesFromLs());
+    }
+  }, []);
+
+  const loadSalud = useCallback(async () => {
+    try {
+      const rows = await getHealthRecords();
+      setSalud(saludFromHealthRecords(rows) as SaludData);
+    } catch {
+      setSalud(readSaludFromLs());
+    }
   }, []);
 
   useEffect(() => {
-    if (!agendaHydrated) return;
-    try {
-      localStorage.setItem(LS_KORE_AGENDA, JSON.stringify(agendaEvents));
-    } catch {
-      /* ignore */
+    queueMicrotask(() => {
+      void Promise.all([loadProfiles(), loadDomains(), loadAgenda(), loadExpenses(), loadSalud()]);
+    });
+  }, [loadAgenda, loadDomains, loadExpenses, loadProfiles, loadSalud]);
+
+  useKoreRealtime(
+    useCallback(
+      (table) => {
+        queueMicrotask(() => {
+          if (table === "domains") void loadDomains();
+          else if (table === "calendar_events") void loadAgenda();
+          else if (table === "expenses") void loadExpenses();
+          else if (table === "health_records") void loadSalud();
+          else if (table === "profiles") void loadProfiles();
+        });
+      },
+      [loadAgenda, loadDomains, loadExpenses, loadProfiles, loadSalud],
+    ),
+  );
+
+  useEffect(() => {
+    if (!activeDomainName) {
+      setDomainHistoryList([]);
+      return;
     }
-  }, [agendaEvents, agendaHydrated]);
+    const d = domains.find((x) => x.name === activeDomainName);
+    if (!d) {
+      setDomainHistoryList([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await getDomainHistory(d.id);
+        if (cancelled) return;
+        setDomainHistoryList(rows.map((r) => ({ id: r.id, at: r.created_at, text: r.text })));
+      } catch {
+        if (!cancelled) setDomainHistoryList([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDomainName, domains]);
 
   const weekDays = useMemo(() => buildWeekDays(new Date(), agendaEvents), [agendaEvents]);
   const agendaMonthYear = useMemo(() => formatMesAnioEs(new Date()), []);
@@ -341,30 +504,145 @@ export default function Home() {
       salud.Leire.medicaciones.length,
     [salud],
   );
-  const handleSaveDomain = (next: Pick<DomainItem, "owner" | "state" | "notes">) => {
-    if (!activeDomainName) return;
-    const updated = domains.map((d) =>
-      d.name === activeDomainName ? { ...d, owner: next.owner, state: next.state, notes: next.notes } : d,
-    );
-    setDomains(updated);
+
+  const sortAgendaEvents = useCallback((list: KoreAgendaEvent[]) => {
+    return [...list].sort((a, b) => {
+      const da = (a.fecha ?? "").localeCompare(b.fecha ?? "");
+      if (da !== 0) return da;
+      return (a.hora ?? "").localeCompare(b.hora ?? "");
+    });
+  }, []);
+
+  const persistAgendaLs = useCallback((next: KoreAgendaEvent[]) => {
     try {
-      localStorage.setItem(LS_KORE_DOMAINS, JSON.stringify(updated));
-      const changed = updated.find((d) => d.name === activeDomainName);
-      if (changed) {
-        const key = `kore_domain_history_${changed.id}`;
+      localStorage.setItem(LS_KORE_AGENDA, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleCalendarAddEvent = useCallback(
+    async (draft: CalendarEventDraft) => {
+      try {
+        const row = await addCalendarEvent({
+          title: draft.titulo,
+          date: draft.fecha,
+          time: draft.hora?.trim().length ? draft.hora : "",
+          created_by: CURRENT_USER_ID,
+        });
+        const ev = calendarRowToEvent(row);
+        setAgendaEvents((prev) => {
+          const next = sortAgendaEvents([...prev, ev]);
+          persistAgendaLs(next);
+          return next;
+        });
+        return ev;
+      } catch {
+        const ev: KoreAgendaEvent = {
+          id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `ev_${Date.now()}`,
+          titulo: draft.titulo,
+          fecha: draft.fecha,
+          hora: draft.hora?.trim().length ? draft.hora : null,
+        };
+        setAgendaEvents((prev) => {
+          const next = sortAgendaEvents([...prev, ev]);
+          persistAgendaLs(next);
+          return next;
+        });
+        return ev;
+      }
+    },
+    [persistAgendaLs, sortAgendaEvents],
+  );
+
+  const handleCalendarUpdateEvent = useCallback(
+    async (id: string, draft: CalendarEventUpdateDraft) => {
+      const ev = agendaEvents.find((e) => e.id === id);
+      const fecha = (ev?.fecha ?? "").slice(0, 10);
+      const nextLocal = (prev: KoreAgendaEvent[]) =>
+        prev.map((e) =>
+          e.id === id ? { ...e, titulo: draft.titulo, hora: draft.hora?.trim().length ? draft.hora : null } : e,
+        );
+      try {
+        await updateCalendarEvent(id, {
+          title: draft.titulo,
+          date: fecha,
+          time: draft.hora?.trim().length ? draft.hora! : "",
+        });
+        setAgendaEvents((prev) => {
+          const next = nextLocal(prev);
+          persistAgendaLs(next);
+          return next;
+        });
+      } catch {
+        setAgendaEvents((prev) => {
+          const next = nextLocal(prev);
+          persistAgendaLs(next);
+          return next;
+        });
+      }
+    },
+    [agendaEvents, persistAgendaLs],
+  );
+
+  const handleCalendarDeleteEvent = useCallback(
+    async (id: string) => {
+      try {
+        await deleteCalendarEvent(id);
+      } catch {
+        return;
+      }
+      setAgendaEvents((prev) => {
+        const next = prev.filter((e) => e.id !== id);
+        persistAgendaLs(next);
+        return next;
+      });
+    },
+    [persistAgendaLs],
+  );
+
+  const handleSaveDomain = async (next: Pick<DomainItem, "owner" | "state" | "notes">) => {
+    if (!activeDomainName) return;
+    const current = domains.find((d) => d.name === activeDomainName);
+    if (!current) return;
+    const owner_id =
+      next.owner === "Ander" ? ANDER_ID : next.owner === "Leire" ? LEIRE_ID : null;
+    const histText = `Owner: ${next.owner} · Estado: ${next.state || "Sin estado"}${
+      next.notes.length ? ` · Nota: ${next.notes[next.notes.length - 1]}` : ""
+    }`;
+    try {
+      await updateDomain(current.id, { owner_id });
+      await addDomainHistory(current.id, histText, CURRENT_USER_ID);
+      const updated = domains.map((d) =>
+        d.name === activeDomainName ? { ...d, owner: next.owner, state: next.state, notes: next.notes } : d,
+      );
+      setDomains(updated);
+      try {
+        localStorage.setItem(LS_KORE_DOMAINS, JSON.stringify(updated));
+      } catch {
+        /* ignore */
+      }
+      const rows = await getDomainHistory(current.id);
+      setDomainHistoryList(rows.map((r) => ({ id: r.id, at: r.created_at, text: r.text })));
+    } catch {
+      const updated = domains.map((d) =>
+        d.name === activeDomainName ? { ...d, owner: next.owner, state: next.state, notes: next.notes } : d,
+      );
+      setDomains(updated);
+      try {
+        localStorage.setItem(LS_KORE_DOMAINS, JSON.stringify(updated));
+        const key = `kore_domain_history_${current.id}`;
         const raw = localStorage.getItem(key);
         const list = raw ? (JSON.parse(raw) as Array<{ id: string; at: string; text: string }>) : [];
         const entry = {
           id: crypto.randomUUID?.() ?? `hist_${Date.now()}`,
           at: new Date().toISOString(),
-          text: `Owner: ${next.owner} · Estado: ${next.state || "Sin estado"}${
-            next.notes.length ? ` · Nota: ${next.notes[next.notes.length - 1]}` : ""
-          }`,
+          text: histText,
         };
         localStorage.setItem(key, JSON.stringify([...(Array.isArray(list) ? list : []), entry]));
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
     setActiveDomainName(null);
   };
@@ -1540,21 +1818,28 @@ export default function Home() {
           saludMember={salud[usuarioPerfil]}
           stressLevel={usuarioPerfil === "Ander" ? anderStress : leireStress}
           onStressChange={(n) => {
-            if (usuarioPerfil === "Ander") {
-              setAnderStress(n);
+            const perfil = usuarioPerfil;
+            const uid = perfil === "Ander" ? ANDER_ID : LEIRE_ID;
+            const persistLs = () => {
               try {
-                localStorage.setItem(LS_KORE_STRESS_ANDER, String(n));
+                localStorage.setItem(
+                  perfil === "Ander" ? LS_KORE_STRESS_ANDER : LS_KORE_STRESS_LEIRE,
+                  String(n),
+                );
               } catch {
                 /* ignore */
               }
-            } else {
-              setLeireStress(n);
+            };
+            void (async () => {
               try {
-                localStorage.setItem(LS_KORE_STRESS_LEIRE, String(n));
+                await updateStressLevel(uid, n);
               } catch {
-                /* ignore */
+                /* Supabase no disponible: mismo estado local + LS */
               }
-            }
+              if (perfil === "Ander") setAnderStress(n);
+              else setLeireStress(n);
+              persistLs();
+            })();
           }}
           onNavigate={handlePerfilNavigate}
         />
@@ -1571,6 +1856,8 @@ export default function Home() {
           }}
           onClose={() => setActiveDomainName(null)}
           onSave={handleSaveDomain}
+          historyEntries={domainHistoryList}
+          historyReadOnly
         />
       ) : null}
 
@@ -1581,8 +1868,10 @@ export default function Home() {
             setCalendarInitialDate(null);
           }}
           events={agendaEvents}
-          onChange={setAgendaEvents}
           initialDate={calendarInitialDate}
+          onAddEvent={handleCalendarAddEvent}
+          onUpdateEvent={handleCalendarUpdateEvent}
+          onDeleteEvent={handleCalendarDeleteEvent}
         />
       ) : null}
       </div>

@@ -54,11 +54,19 @@ function newId() {
   return `ev_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+export type CalendarEventDraft = { titulo: string; fecha: string; hora: string | null };
+export type CalendarEventUpdateDraft = { titulo: string; hora: string | null };
+
 export type CalendarModalProps = {
   onClose: () => void;
   events: KoreAgendaEvent[];
-  onChange: (next: KoreAgendaEvent[]) => void;
   initialDate?: Date | null;
+  /** Modo local: mutaciones en memoria (sin handlers remotos). */
+  onChange?: (next: KoreAgendaEvent[]) => void;
+  /** Modo remoto: el padre persiste (p. ej. Supabase) y actualiza `events`. */
+  onAddEvent?: (draft: CalendarEventDraft) => Promise<KoreAgendaEvent>;
+  onUpdateEvent?: (id: string, draft: CalendarEventUpdateDraft) => Promise<void>;
+  onDeleteEvent?: (id: string) => Promise<void>;
 };
 
 export function CalendarModal({
@@ -66,7 +74,11 @@ export function CalendarModal({
   events,
   onChange,
   initialDate,
+  onAddEvent,
+  onUpdateEvent,
+  onDeleteEvent,
 }: CalendarModalProps) {
+  const useRemote = Boolean(onAddEvent && onUpdateEvent && onDeleteEvent);
   const [mesCalendario, setMesCalendario] = useState<Date>(() => new Date());
   const [diaDetalleFecha, setDiaDetalleFecha] = useState<string | null>(null);
   const [fechaHoyIso, setFechaHoyIso] = useState("");
@@ -125,67 +137,77 @@ export function CalendarModal({
     setDraftHora("");
   };
 
-  const guardarEdicion = useCallback(() => {
+  const guardarEdicion = useCallback(async () => {
     if (!agendaEditandoId || agendaAccionLoading) return;
     const titulo = draftTitulo.trim();
     if (!titulo) return;
     setAgendaAccionLoading(true);
     try {
       const horaVal = draftHora.trim();
-      onChange(
-        events.map((e) =>
-          e.id === agendaEditandoId
-            ? { ...e, titulo, hora: horaVal.length > 0 ? horaVal : null }
-            : e,
-        ),
-      );
+      if (useRemote && onUpdateEvent) {
+        await onUpdateEvent(agendaEditandoId, { titulo, hora: horaVal.length > 0 ? horaVal : null });
+      } else if (onChange) {
+        onChange(
+          events.map((e) =>
+            e.id === agendaEditandoId ? { ...e, titulo, hora: horaVal.length > 0 ? horaVal : null } : e,
+          ),
+        );
+      }
       cancelarEdicion();
     } finally {
       setAgendaAccionLoading(false);
     }
-  }, [agendaAccionLoading, agendaEditandoId, draftHora, draftTitulo, events, onChange]);
+  }, [agendaAccionLoading, agendaEditandoId, draftHora, draftTitulo, events, onChange, onUpdateEvent, useRemote]);
 
   const eliminarEvento = useCallback(
-    (ev: KoreAgendaEvent) => {
+    async (ev: KoreAgendaEvent) => {
       if (agendaAccionLoading) return;
       if (!window.confirm("¿Eliminar este evento?")) return;
       setAgendaAccionLoading(true);
       try {
         const fechaKey = (ev.fecha ?? "").slice(0, 10);
-        const next = events.filter((e) => e.id !== ev.id);
-        onChange(next);
-        if (diaDetalleFecha === fechaKey) {
-          const quedan = next.filter((e) => (e.fecha ?? "").slice(0, 10) === fechaKey);
-          if (quedan.length === 0) setDiaDetalleFecha(null);
+        if (useRemote && onDeleteEvent) {
+          await onDeleteEvent(ev.id);
+        } else if (onChange) {
+          const next = events.filter((e) => e.id !== ev.id);
+          onChange(next);
+          if (diaDetalleFecha === fechaKey) {
+            const quedan = next.filter((e) => (e.fecha ?? "").slice(0, 10) === fechaKey);
+            if (quedan.length === 0) setDiaDetalleFecha(null);
+          }
         }
         if (agendaEditandoId === ev.id) cancelarEdicion();
       } finally {
         setAgendaAccionLoading(false);
       }
     },
-    [agendaAccionLoading, agendaEditandoId, diaDetalleFecha, events, onChange],
+    [agendaAccionLoading, agendaEditandoId, diaDetalleFecha, events, onChange, onDeleteEvent, useRemote],
   );
 
-  const añadirCita = useCallback(() => {
+  const añadirCita = useCallback(async () => {
     if (!diaDetalleFecha || agendaAccionLoading) return;
     const titulo = nuevoTitulo.trim();
     if (!titulo) return;
     setAgendaAccionLoading(true);
     try {
       const horaVal = nuevaHora.trim();
-      const nuevo: KoreAgendaEvent = {
-        id: newId(),
-        titulo,
-        fecha: diaDetalleFecha,
-        hora: horaVal.length > 0 ? horaVal : null,
-      };
-      onChange([...events, nuevo]);
+      if (useRemote && onAddEvent) {
+        await onAddEvent({ titulo, fecha: diaDetalleFecha, hora: horaVal.length > 0 ? horaVal : null });
+      } else if (onChange) {
+        const nuevo: KoreAgendaEvent = {
+          id: newId(),
+          titulo,
+          fecha: diaDetalleFecha,
+          hora: horaVal.length > 0 ? horaVal : null,
+        };
+        onChange([...events, nuevo]);
+      }
       setNuevoTitulo("");
       setNuevaHora("");
     } finally {
       setAgendaAccionLoading(false);
     }
-  }, [agendaAccionLoading, diaDetalleFecha, events, nuevaHora, nuevoTitulo, onChange]);
+  }, [agendaAccionLoading, diaDetalleFecha, events, nuevaHora, nuevoTitulo, onAddEvent, onChange, useRemote]);
 
   const navBtn: CSSProperties = {
     display: "inline-flex",
@@ -464,74 +486,16 @@ export function CalendarModal({
                 })}
               </p>
 
-              <div
+              <ul
                 style={{
-                  marginBottom: 16,
+                  margin: "0 0 16px",
+                  padding: 0,
+                  listStyle: "none",
                   display: "flex",
                   flexDirection: "column",
                   gap: 8,
-                  borderRadius: 8,
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  background: "rgba(9,11,16,0.8)",
-                  padding: 12,
                 }}
               >
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    color: "rgba(255,255,255,0.5)",
-                  }}
-                >
-                  Nueva cita
-                </p>
-                <input
-                  type="text"
-                  value={nuevoTitulo}
-                  onChange={(e) => setNuevoTitulo(e.target.value)}
-                  disabled={agendaAccionLoading}
-                  placeholder="Título"
-                  style={{
-                    ...inputBase,
-                    opacity: agendaAccionLoading ? 0.6 : 1,
-                  }}
-                />
-                <input
-                  type="text"
-                  value={nuevaHora}
-                  onChange={(e) => setNuevaHora(e.target.value)}
-                  disabled={agendaAccionLoading}
-                  placeholder="Hora (opcional, ej. 10:30)"
-                  style={{
-                    ...inputBase,
-                    opacity: agendaAccionLoading ? 0.6 : 1,
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => void añadirCita()}
-                  disabled={agendaAccionLoading || !nuevoTitulo.trim()}
-                  style={{
-                    width: "100%",
-                    borderRadius: 8,
-                    padding: "8px 0",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    color: "#090b10",
-                    background: "#4CC9A0",
-                    border: "none",
-                    cursor: agendaAccionLoading || !nuevoTitulo.trim() ? "not-allowed" : "pointer",
-                    opacity: agendaAccionLoading || !nuevoTitulo.trim() ? 0.5 : 1,
-                  }}
-                >
-                  Añadir
-                </button>
-              </div>
-
-              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
                 {(eventosPorFecha.get(diaDetalleFecha) ?? []).length === 0 ? (
                   <li style={{ fontSize: 14, color: "rgba(255,255,255,0.55)" }}>Sin citas este día.</li>
                 ) : null}
@@ -652,6 +616,72 @@ export function CalendarModal({
                   </li>
                 ))}
               </ul>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(9,11,16,0.8)",
+                  padding: 12,
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: "rgba(255,255,255,0.5)",
+                  }}
+                >
+                  Nueva cita
+                </p>
+                <input
+                  type="text"
+                  value={nuevoTitulo}
+                  onChange={(e) => setNuevoTitulo(e.target.value)}
+                  disabled={agendaAccionLoading}
+                  placeholder="Título"
+                  style={{
+                    ...inputBase,
+                    opacity: agendaAccionLoading ? 0.6 : 1,
+                  }}
+                />
+                <input
+                  type="text"
+                  value={nuevaHora}
+                  onChange={(e) => setNuevaHora(e.target.value)}
+                  disabled={agendaAccionLoading}
+                  placeholder="Hora (opcional, ej. 10:30)"
+                  style={{
+                    ...inputBase,
+                    opacity: agendaAccionLoading ? 0.6 : 1,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void añadirCita()}
+                  disabled={agendaAccionLoading || !nuevoTitulo.trim()}
+                  style={{
+                    width: "100%",
+                    borderRadius: 8,
+                    padding: "8px 0",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#090b10",
+                    background: "#4CC9A0",
+                    border: "none",
+                    cursor: agendaAccionLoading || !nuevoTitulo.trim() ? "not-allowed" : "pointer",
+                    opacity: agendaAccionLoading || !nuevoTitulo.trim() ? 0.5 : 1,
+                  }}
+                >
+                  Añadir
+                </button>
+              </div>
             </div>
           ) : null}
         </div>

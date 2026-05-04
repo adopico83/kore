@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type DomainItem = {
   id: string;
@@ -12,10 +12,16 @@ export type DomainItem = {
   notes: string[];
 };
 
+export type DomainHistoryEntry = { id: string; at: string; text: string };
+
 export type DomainModalProps = {
   domain: DomainItem;
   onClose: () => void;
-  onSave: (next: Pick<DomainItem, "owner" | "state" | "notes">) => void;
+  onSave: (next: Pick<DomainItem, "owner" | "state" | "notes">) => void | Promise<void>;
+  /** Historial remoto (Supabase). Si no se pasa, se usa `localStorage` como antes. */
+  historyEntries?: DomainHistoryEntry[];
+  /** Si true, el historial no permite borrar entradas (no hay API de borrado). */
+  historyReadOnly?: boolean;
 };
 
 const cardStyle: CSSProperties = {
@@ -25,23 +31,52 @@ const cardStyle: CSSProperties = {
   padding: 12,
 };
 
-export function DomainModal({ domain, onClose, onSave }: DomainModalProps) {
+export function DomainModal({ domain, onClose, onSave, historyEntries, historyReadOnly }: DomainModalProps) {
   const [owner, setOwner] = useState(domain.owner);
   const [stateText, setStateText] = useState(domain.state);
   const [notes, setNotes] = useState<string[]>(domain.notes ?? []);
   const [newNote, setNewNote] = useState("");
-  const [history, setHistory] = useState<Array<{ id: string; at: string; text: string }>>(() => {
+  const [history, setHistory] = useState<DomainHistoryEntry[]>(() => {
+    if (historyReadOnly) return historyEntries ?? [];
+    if (historyEntries !== undefined) return historyEntries;
     try {
       const raw = localStorage.getItem(`kore_domain_history_${domain.id}`);
       if (!raw) return [];
-      const parsed = JSON.parse(raw) as Array<{ id: string; at: string; text: string }>;
+      const parsed = JSON.parse(raw) as DomainHistoryEntry[];
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
   });
 
+  useEffect(() => {
+    setOwner(domain.owner);
+    setStateText(domain.state);
+    setNotes(domain.notes ?? []);
+    setNewNote("");
+    if (historyReadOnly) {
+      setHistory(historyEntries ?? []);
+      return;
+    }
+    if (historyEntries !== undefined) {
+      setHistory(historyEntries);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`kore_domain_history_${domain.id}`);
+      if (!raw) {
+        setHistory([]);
+        return;
+      }
+      const parsed = JSON.parse(raw) as DomainHistoryEntry[];
+      setHistory(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setHistory([]);
+    }
+  }, [domain.id, domain.owner, domain.state, domain.notes, historyEntries, historyReadOnly]);
+
   const removeHistoryEntry = (entryId: string) => {
+    if (historyReadOnly) return;
     const next = history.filter((h) => h.id !== entryId);
     setHistory(next);
     try {
@@ -102,8 +137,8 @@ export function DomainModal({ domain, onClose, onSave }: DomainModalProps) {
       <main style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>
         <section style={cardStyle}>
           <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Lo lleva:</p>
-          <div style={{ display: "flex", gap: 8 }}>
-            {["Ander", "Leire"].map((name) => (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(["Ander", "Leire", "Sin asignar"] as const).map((name) => (
               <button
                 key={name}
                 type="button"
@@ -255,22 +290,24 @@ export function DomainModal({ domain, onClose, onSave }: DomainModalProps) {
                           {entry.text}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeHistoryEntry(entry.id)}
-                        style={{
-                          border: "none",
-                          background: "transparent",
-                          color: "rgba(228,230,237,0.65)",
-                          cursor: "pointer",
-                          fontSize: 14,
-                          lineHeight: 1,
-                          flexShrink: 0,
-                        }}
-                        aria-label="Eliminar entrada del historial"
-                      >
-                        ✕
-                      </button>
+                      {historyReadOnly ? null : (
+                        <button
+                          type="button"
+                          onClick={() => removeHistoryEntry(entry.id)}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "rgba(228,230,237,0.65)",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            lineHeight: 1,
+                            flexShrink: 0,
+                          }}
+                          aria-label="Eliminar entrada del historial"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </li>
                   );
                 })}
@@ -282,7 +319,7 @@ export function DomainModal({ domain, onClose, onSave }: DomainModalProps) {
       <footer style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: 12 }}>
         <button
           type="button"
-          onClick={() => onSave({ owner, state: stateText.trim(), notes })}
+          onClick={() => void Promise.resolve(onSave({ owner, state: stateText.trim(), notes }))}
           style={{
             width: "100%",
             borderRadius: 10,

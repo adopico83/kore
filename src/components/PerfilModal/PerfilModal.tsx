@@ -42,9 +42,6 @@ const BG = "#090b10";
 const CARD = "#161a22";
 const TEXT = "#e4e6ed";
 const MUTED = "rgba(228, 230, 237, 0.45)";
-const LS_KORE_DOMAINS_STATE = "kore_domains_state";
-const LS_KORE_SALUD = "kore_salud";
-
 function stressBarColor(level: number): string {
   if (level >= 8) return "#4CC9A0";
   if (level >= 4) return "#EF9F27";
@@ -135,40 +132,12 @@ export function PerfilModal({
   const stress = clampStress(stressLevel);
 
   useEffect(() => {
-    queueMicrotask(() => {
-      try {
-        const rawD = localStorage.getItem(LS_KORE_DOMAINS_STATE);
-        if (rawD) {
-          const p = JSON.parse(rawD) as PerfilDomainRow[];
-          if (Array.isArray(p) && p.length > 0) {
-            setDomainRows(p);
-          } else {
-            setDomainRows(domains);
-          }
-        } else {
-          setDomainRows(domains);
-        }
-      } catch {
-        setDomainRows(domains);
-      }
-      try {
-        const rawS = localStorage.getItem(LS_KORE_SALUD);
-        if (rawS) {
-          const data = JSON.parse(rawS) as Record<string, { citas?: PerfilCitaRow[] }>;
-          const m = data[usuario];
-          if (m?.citas && Array.isArray(m.citas)) {
-            setCitasRows(m.citas);
-          } else {
-            setCitasRows(saludMember.citas ?? []);
-          }
-        } else {
-          setCitasRows(saludMember.citas ?? []);
-        }
-      } catch {
-        setCitasRows(saludMember.citas ?? []);
-      }
-    });
-  }, [usuario, domains, saludMember]);
+    setDomainRows(domains);
+  }, [domains]);
+
+  useEffect(() => {
+    setCitasRows(saludMember.citas ?? []);
+  }, [saludMember, usuario]);
 
   const barColor = stressBarColor(stress);
   const avatarBorder = stressAvatarBorder(stress);

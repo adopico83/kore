@@ -1,6 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import {
+  addHealthRecord,
+  deleteHealthRecord,
+  getHealthRecords,
+  updateHealthRecord,
+} from "@/lib/kore-db";
+import {
+  buildCitaHealthInsert,
+  buildCitaHealthUpdate,
+  buildMedHealthInsert,
+  buildMedHealthUpdate,
+  saludFromHealthRecords,
+} from "@/lib/kore-salud-sync";
 
 export const LS_KORE_SALUD = "kore_salud";
 
@@ -87,10 +101,28 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
   const [frecuenciaHoras, setFrecuenciaHoras] = useState("");
   const [proximaToma, setProximaToma] = useState("");
 
-  const update = (next: SaludData) => {
+  const applyLocal = (next: SaludData) => {
     setData(next);
     saveSalud(next);
     onChange?.(next);
+  };
+
+  const reloadFromRemote = async () => {
+    try {
+      const rows = await getHealthRecords();
+      const next = saludFromHealthRecords(rows) as SaludData;
+      applyLocal(next);
+    } catch {
+      applyLocal(readSalud());
+    }
+  };
+
+  useEffect(() => {
+    void reloadFromRemote();
+  }, []);
+
+  const update = (next: SaludData) => {
+    applyLocal(next);
   };
 
   const totalPendientes = useMemo(
@@ -101,24 +133,58 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
     [data],
   );
 
-  const addItem = () => {
-    const next = structuredClone(data);
+  const addItem = async () => {
     if (tipo === "cita") {
       if (!descripcion.trim() || !fecha || !hora) return;
-      next[miembro].citas.push({
-        id: crypto.randomUUID?.() ?? `cita_${Date.now()}`,
-        descripcion: descripcion.trim(),
-        fecha,
-        hora,
-        lugar: lugar.trim(),
-      });
-      setDescripcion("");
-      setFecha("");
-      setHora("");
-      setLugar("");
-    } else {
-      const freq = Number(frecuenciaHoras);
-      if (!nombre.trim() || !dosis.trim() || Number.isNaN(freq) || freq <= 0 || !proximaToma) return;
+      try {
+        await addHealthRecord(
+          buildCitaHealthInsert(miembro, {
+            descripcion: descripcion.trim(),
+            fecha,
+            hora,
+            lugar: lugar.trim(),
+          }),
+        );
+        setDescripcion("");
+        setFecha("");
+        setHora("");
+        setLugar("");
+        await reloadFromRemote();
+      } catch {
+        const next = structuredClone(data);
+        next[miembro].citas.push({
+          id: crypto.randomUUID?.() ?? `cita_${Date.now()}`,
+          descripcion: descripcion.trim(),
+          fecha,
+          hora,
+          lugar: lugar.trim(),
+        });
+        setDescripcion("");
+        setFecha("");
+        setHora("");
+        setLugar("");
+        update(next);
+      }
+      return;
+    }
+    const freq = Number(frecuenciaHoras);
+    if (!nombre.trim() || !dosis.trim() || Number.isNaN(freq) || freq <= 0 || !proximaToma) return;
+    try {
+      await addHealthRecord(
+        buildMedHealthInsert(miembro, {
+          nombre: nombre.trim(),
+          dosis: dosis.trim(),
+          frecuenciaHoras: freq,
+          proximaToma,
+        }),
+      );
+      setNombre("");
+      setDosis("");
+      setFrecuenciaHoras("");
+      setProximaToma("");
+      await reloadFromRemote();
+    } catch {
+      const next = structuredClone(data);
       next[miembro].medicaciones.push({
         id: crypto.randomUUID?.() ?? `med_${Date.now()}`,
         nombre: nombre.trim(),
@@ -130,20 +196,30 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
       setDosis("");
       setFrecuenciaHoras("");
       setProximaToma("");
+      update(next);
     }
-    update(next);
   };
 
-  const removeCita = (member: Member, id: string) => {
-    const next = structuredClone(data);
-    next[member].citas = next[member].citas.filter((c) => c.id !== id);
-    update(next);
+  const removeCita = async (member: Member, id: string) => {
+    try {
+      await deleteHealthRecord(id);
+      await reloadFromRemote();
+    } catch {
+      const next = structuredClone(data);
+      next[member].citas = next[member].citas.filter((c) => c.id !== id);
+      update(next);
+    }
   };
 
-  const removeMed = (member: Member, id: string) => {
-    const next = structuredClone(data);
-    next[member].medicaciones = next[member].medicaciones.filter((m) => m.id !== id);
-    update(next);
+  const removeMed = async (member: Member, id: string) => {
+    try {
+      await deleteHealthRecord(id);
+      await reloadFromRemote();
+    } catch {
+      const next = structuredClone(data);
+      next[member].medicaciones = next[member].medicaciones.filter((m) => m.id !== id);
+      update(next);
+    }
   };
 
   const startEditCita = (member: Member, cita: Cita) => {
@@ -156,41 +232,71 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
     setEditMedDraft(med);
   };
 
-  const saveEditCita = (member: Member, id: string) => {
+  const saveEditCita = async (member: Member, id: string) => {
     if (!editCitaDraft.descripcion.trim() || !editCitaDraft.fecha || !editCitaDraft.hora) return;
-    const next = structuredClone(data);
-    next[member].citas = next[member].citas.map((c) =>
-      c.id === id
-        ? {
-            ...c,
-            descripcion: editCitaDraft.descripcion.trim(),
-            fecha: editCitaDraft.fecha,
-            hora: editCitaDraft.hora,
-            lugar: editCitaDraft.lugar.trim(),
-          }
-        : c,
-    );
-    update(next);
-    setEditingKey(null);
+    try {
+      await updateHealthRecord(
+        id,
+        buildCitaHealthUpdate({
+          member,
+          descripcion: editCitaDraft.descripcion.trim(),
+          fecha: editCitaDraft.fecha,
+          hora: editCitaDraft.hora,
+          lugar: editCitaDraft.lugar.trim(),
+        }),
+      );
+      setEditingKey(null);
+      await reloadFromRemote();
+    } catch {
+      const next = structuredClone(data);
+      next[member].citas = next[member].citas.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              descripcion: editCitaDraft.descripcion.trim(),
+              fecha: editCitaDraft.fecha,
+              hora: editCitaDraft.hora,
+              lugar: editCitaDraft.lugar.trim(),
+            }
+          : c,
+      );
+      update(next);
+      setEditingKey(null);
+    }
   };
 
-  const saveEditMed = (member: Member, id: string) => {
+  const saveEditMed = async (member: Member, id: string) => {
     const freq = Number(editMedDraft.frecuenciaHoras);
     if (!editMedDraft.nombre.trim() || !editMedDraft.dosis.trim() || Number.isNaN(freq) || freq <= 0 || !editMedDraft.proximaToma) return;
-    const next = structuredClone(data);
-    next[member].medicaciones = next[member].medicaciones.map((m) =>
-      m.id === id
-        ? {
-            ...m,
-            nombre: editMedDraft.nombre.trim(),
-            dosis: editMedDraft.dosis.trim(),
-            frecuenciaHoras: freq,
-            proximaToma: editMedDraft.proximaToma,
-          }
-        : m,
-    );
-    update(next);
-    setEditingKey(null);
+    try {
+      await updateHealthRecord(
+        id,
+        buildMedHealthUpdate({
+          member,
+          nombre: editMedDraft.nombre.trim(),
+          dosis: editMedDraft.dosis.trim(),
+          frecuenciaHoras: freq,
+          proximaToma: editMedDraft.proximaToma,
+        }),
+      );
+      setEditingKey(null);
+      await reloadFromRemote();
+    } catch {
+      const next = structuredClone(data);
+      next[member].medicaciones = next[member].medicaciones.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              nombre: editMedDraft.nombre.trim(),
+              dosis: editMedDraft.dosis.trim(),
+              frecuenciaHoras: freq,
+              proximaToma: editMedDraft.proximaToma,
+            }
+          : m,
+      );
+      update(next);
+      setEditingKey(null);
+    }
   };
 
   return (
@@ -239,7 +345,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
                                   </div>
                                   <input value={editCitaDraft.lugar} onChange={(e) => setEditCitaDraft((d) => ({ ...d, lugar: e.target.value }))} placeholder="Lugar" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                                   <div style={{ display: "flex", gap: 8 }}>
-                                    <button type="button" onClick={() => saveEditCita(member, c.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Guardar</button>
+                                    <button type="button" onClick={() => void saveEditCita(member, c.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Guardar</button>
                                     <button type="button" onClick={() => setEditingKey(null)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
                                   </div>
                                 </div>
@@ -251,7 +357,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
                                   </div>
                                   <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
                                     <button type="button" onClick={() => startEditCita(member, c)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Editar</button>
-                                    <button type="button" onClick={() => removeCita(member, c.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "rgba(228,230,237,0.75)", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Eliminar</button>
+                                    <button type="button" onClick={() => void removeCita(member, c.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "rgba(228,230,237,0.75)", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Eliminar</button>
                                   </div>
                                 </>
                               )}
@@ -279,7 +385,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
                                   <input value={String(editMedDraft.frecuenciaHoras)} onChange={(e) => setEditMedDraft((d) => ({ ...d, frecuenciaHoras: Number(e.target.value) || d.frecuenciaHoras }))} inputMode="numeric" placeholder="Frecuencia (horas)" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                                   <input type="datetime-local" value={editMedDraft.proximaToma} onChange={(e) => setEditMedDraft((d) => ({ ...d, proximaToma: e.target.value }))} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                                   <div style={{ display: "flex", gap: 8 }}>
-                                    <button type="button" onClick={() => saveEditMed(member, m.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Guardar</button>
+                                    <button type="button" onClick={() => void saveEditMed(member, m.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>Guardar</button>
                                     <button type="button" onClick={() => setEditingKey(null)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
                                   </div>
                                 </div>
@@ -291,7 +397,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
                                   </div>
                                   <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
                                     <button type="button" onClick={() => startEditMed(member, m)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Editar</button>
-                                    <button type="button" onClick={() => removeMed(member, m.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "rgba(228,230,237,0.75)", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Eliminar</button>
+                                    <button type="button" onClick={() => void removeMed(member, m.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "rgba(228,230,237,0.75)", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Eliminar</button>
                                   </div>
                                 </>
                               )}
@@ -334,7 +440,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
                 <input type="datetime-local" value={proximaToma} onChange={(e) => setProximaToma(e.target.value)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
               </>
             )}
-            <button type="button" onClick={addItem} style={{ borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer" }}>
+            <button type="button" onClick={() => void addItem()} style={{ borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", fontWeight: 700, cursor: "pointer" }}>
               Añadir
             </button>
           </div>
