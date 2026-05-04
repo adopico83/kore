@@ -73,12 +73,6 @@ function avatarStressShadow(level: number): string {
   return "0 0 12px rgba(224, 85, 85, 0.35)";
 }
 
-function stressThermometerColor(level: number): string {
-  if (level >= 8) return "#4CC9A0";
-  if (level >= 4) return "#EF9F27";
-  return "#E05555";
-}
-
 function readAgendaFromLs(): KoreAgendaEvent[] {
   if (typeof window === "undefined") return [];
   try {
@@ -661,8 +655,11 @@ export default function Home() {
     }
   };
 
-  const stressSum = anderStress + leireStress;
-  const survival = stressSum > 16;
+  const economiaCardTitle = useMemo(() => {
+    const raw = new Date().toLocaleDateString("es-ES", { month: "long" });
+    const month = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "";
+    return month ? `Balance ${month}` : "Economía";
+  }, []);
 
   const avatarBase: CSSProperties = {
     width: 40,
@@ -1501,6 +1498,7 @@ export default function Home() {
             ...cardShell,
             display: "block",
             width: "calc(100% - 32px)",
+            marginBottom: 120,
             textAlign: "left",
             cursor: "pointer",
             color: C.text,
@@ -1511,7 +1509,7 @@ export default function Home() {
             <span style={{ fontSize: 22 }} aria-hidden>
               💶
             </span>
-            <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>Balance mayo</p>
+            <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{economiaCardTitle}</p>
           </div>
           <div
             style={{
@@ -1541,31 +1539,53 @@ export default function Home() {
                 Gastos mes
               </p>
               <p style={{ margin: "8px 0 0", fontSize: 18, fontWeight: 700, color: C.red }}>
-                -{economia.totalMes.toFixed(2).replace(".", ",")}€
+                {economia.totalMes.toFixed(2).replace(".", ",")}€
               </p>
             </div>
             <div
               style={{
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "center",
+                gap: 10,
                 borderRadius: 12,
                 background: "rgba(255,255,255,0.04)",
                 padding: 12,
                 border: "0.5px solid rgba(255,255,255,0.06)",
               }}
             >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 10,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: C.muted,
-                }}
-              >
-                Ander debe
-              </p>
-              <p style={{ margin: "8px 0 0", fontSize: 18, fontWeight: 700, color: C.green }}>
-                +{economia.debeAnder.toFixed(2).replace(".", ",")}€
-              </p>
+              <div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: C.muted,
+                  }}
+                >
+                  Debe Ander
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700, color: C.green }}>
+                  {economia.debeAnder.toFixed(2).replace(".", ",")}€
+                </p>
+              </div>
+              <div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: C.muted,
+                  }}
+                >
+                  Debe Leire
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700, color: C.green }}>
+                  {economia.debeLeire.toFixed(2).replace(".", ",")}€
+                </p>
+              </div>
             </div>
           </div>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1596,127 +1616,6 @@ export default function Home() {
             ))}
           </ul>
         </button>
-
-        {/* Termómetro */}
-        <section style={{ ...cardShell, marginBottom: 120 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-            <span aria-hidden>❤️</span>
-            <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>Check-in nocturno</p>
-          </div>
-          {survival ? (
-            <div
-              style={{
-                marginBottom: 16,
-                borderRadius: 12,
-                border: "0.5px solid rgba(239, 159, 39, 0.45)",
-                background: "rgba(239, 159, 39, 0.18)",
-                padding: "10px 12px",
-                textAlign: "center",
-                fontSize: 14,
-                fontWeight: 600,
-                color: C.amber,
-              }}
-            >
-              Survival mode — suma de estrés mayor que 16
-            </div>
-          ) : null}
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <button
-              type="button"
-              onClick={() =>
-                setAnderStress((n) => {
-                  const next = n >= 10 ? 1 : n + 1;
-                  try {
-                    localStorage.setItem(LS_KORE_STRESS_ANDER, String(next));
-                  } catch {
-                    /* ignore */
-                  }
-                  return next;
-                })
-              }
-              style={{
-                display: "block",
-                width: "100%",
-                borderRadius: 12,
-                border: "0.5px solid rgba(255,255,255,0.08)",
-                background: "rgba(255,255,255,0.03)",
-                padding: 12,
-                textAlign: "left",
-                cursor: "pointer",
-                color: C.text,
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14 }}>
-                <span style={{ color: C.muted }}>Ander</span>
-                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{anderStress}</span>
-              </div>
-              <div
-                style={{
-                  height: 8,
-                  overflow: "hidden",
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.08)",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    borderRadius: 999,
-                    background: stressThermometerColor(anderStress),
-                    width: `${(anderStress / 10) * 100}%`,
-                  }}
-                />
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setLeireStress((n) => {
-                  const next = n >= 10 ? 1 : n + 1;
-                  try {
-                    localStorage.setItem(LS_KORE_STRESS_LEIRE, String(next));
-                  } catch {
-                    /* ignore */
-                  }
-                  return next;
-                })
-              }
-              style={{
-                display: "block",
-                width: "100%",
-                borderRadius: 12,
-                border: "0.5px solid rgba(255,255,255,0.08)",
-                background: "rgba(255,255,255,0.03)",
-                padding: 12,
-                textAlign: "left",
-                cursor: "pointer",
-                color: C.text,
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14 }}>
-                <span style={{ color: C.muted }}>Leire</span>
-                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{leireStress}</span>
-              </div>
-              <div
-                style={{
-                  height: 8,
-                  overflow: "hidden",
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.08)",
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    borderRadius: 999,
-                    background: stressThermometerColor(leireStress),
-                    width: `${(leireStress / 10) * 100}%`,
-                  }}
-                />
-              </div>
-            </button>
-          </div>
-        </section>
       </main>
 
       <nav

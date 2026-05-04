@@ -27,12 +27,16 @@ type ConvMeta = {
   total_mensajes: number;
 };
 
+type ToolExecuted = { name: string; result: unknown };
+
 interface ChatMessage {
   id: string;
   role: MessageRole;
   content: string;
   imagenPreviews?: string[];
   at: string;
+  /** Acciones de tools aplicadas en la respuesta del ORC (servidor). */
+  toolsExecuted?: ToolExecuted[];
 }
 
 function formatHHMM(iso: string) {
@@ -579,12 +583,23 @@ export function AgentChat({ onClose }: AgentChatProps) {
           ...(imagenesEnviar.length > 0 ? { imagenes: imagenesEnviar } : {}),
         }),
       });
-      const data = (await res.json()) as { respuesta?: string; error?: string };
+      const data = (await res.json()) as {
+        reply?: string;
+        respuesta?: string;
+        toolsExecuted?: ToolExecuted[];
+        error?: string;
+      };
       if (!res.ok) {
         setError(data.error ?? "Error al llamar al ORC");
         return;
       }
-      const respuestaTexto = typeof data.respuesta === "string" ? data.respuesta : "";
+      const respuestaTexto =
+        typeof data.reply === "string" && data.reply.length > 0
+          ? data.reply
+          : typeof data.respuesta === "string"
+            ? data.respuesta
+            : "";
+      const toolsExecuted = Array.isArray(data.toolsExecuted) ? data.toolsExecuted : undefined;
       const asstAt = new Date().toISOString();
       setHistorial((prev) => [
         ...prev,
@@ -593,6 +608,7 @@ export function AgentChat({ onClose }: AgentChatProps) {
           role: "assistant",
           content: respuestaTexto,
           at: asstAt,
+          ...(toolsExecuted?.length ? { toolsExecuted } : {}),
         },
       ]);
     } catch {
@@ -1081,6 +1097,23 @@ export function AgentChat({ onClose }: AgentChatProps) {
                         <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     </div>
+                    {(msg.toolsExecuted ?? []).length > 0 ? (
+                      <div style={{ marginTop: 6 }}>
+                        {(msg.toolsExecuted ?? []).map((t, idx) => (
+                          <p
+                            key={`${msg.id}-tool-${idx}-${t.name}`}
+                            style={{
+                              margin: 0,
+                              fontSize: 11,
+                              color: "#4CC9A0",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            ✓ {t.name}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
                     <p style={{ margin: "4px 0 0", fontSize: 10, color: "rgba(255,255,255,0.45)" }}>
                       {formatHHMM(msg.at)}
                     </p>

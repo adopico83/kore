@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
+import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
+import { getAgentMemory } from "@/lib/kore-db";
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-
-const ORC_SYSTEM_PROMPT = `Eres el ORC (Orquestador Kore), el asistente central de la app Kore para un hogar familiar.
-
-Tu misión es ayudar a coordinar y clarificar, con tono cercano y profesional, en español de España:
-- Agenda familiar (citas, colegio, actividades, recordatorios compartidos).
-- Gastos y economía doméstica (presupuesto, repartos, deudas entre miembros, compras).
-- Salud familiar (citas médicas, medicación, seguimiento no sustitutivo de médicos: nunca des consejo médico definitivo; sugiere consultar profesional cuando proceda).
-- Dominios del hogar (tareas, rutinas, responsabilidades, “menú”, limpieza, sueño, etc.).
-
-Reglas:
-- Sé conciso salvo que pidan detalle.
-- Si falta información, pregunta una sola cosa a la vez.
-- No inventes datos del calendario o gastos: si el usuario no ha dado cifras o fechas, dilo y propón cómo registrarlo en Kore.
-- No accedes a bases de datos externas en esta versión: trabaja solo con lo que diga el usuario y el historial del chat.`;
 
 type Hist = { role: string; content: string };
 
@@ -42,6 +31,8 @@ function normalizarImagenDataUrl(imagen: string): string | null {
   if (!IMAGEN_VISION_MIMES.has(mime)) return null;
   return s;
 }
+
+const MAX_TOOL_ROUNDS = 14;
 
 export async function POST(request: NextRequest) {
   try {
@@ -75,6 +66,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const memories = await getAgentMemory();
+    const systemPrompt = buildSystemPrompt(memories);
+
     const historialLimpio: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     for (const h of rawHist.slice(-40)) {
       if (h.role !== "user" && h.role !== "assistant") continue;
@@ -95,27 +89,69 @@ export async function POST(request: NextRequest) {
     }
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: "system", content: ORC_SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       ...historialLimpio,
       { role: "user", content: userParts },
     ];
 
-    const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+    const toolsExecuted: { name: string; result: unknown }[] = [];
+    let reply = "";
 
-    const completion = await openai.chat.completions.create({
-      model,
-      messages,
-      temperature: 0.6,
-      max_tokens: 1200,
-    });
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages,
+        tools: allTools,
+        tool_choice: "auto",
+        temperature: 0.5,
+        max_tokens: 1600,
+      });
 
-    const respuesta = completion.choices[0]?.message?.content?.trim() ?? "";
+      const msg = completion.choices[0]?.message;
+      if (!msg) {
+        return NextResponse.json({ error: "Respuesta vacía del modelo" }, { status: 502 });
+      }
 
-    if (!respuesta) {
-      return NextResponse.json({ error: "Respuesta vacía del modelo" }, { status: 502 });
+      messages.push(msg);
+
+      const calls = msg.tool_calls;
+      if (!calls?.length) {
+        reply = msg.content?.trim() ?? "";
+        break;
+      }
+
+      for (const tc of calls) {
+        if (tc.type !== "function") continue;
+        const name = tc.function.name;
+        let args: unknown = {};
+        try {
+          args = JSON.parse(tc.function.arguments || "{}");
+        } catch {
+          args = {};
+        }
+        let result: unknown;
+        try {
+          result = await executeTool(name, args);
+        } catch (e) {
+          result = { error: e instanceof Error ? e.message : "Error al ejecutar herramienta" };
+        }
+        toolsExecuted.push({ name, result });
+        messages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify(result),
+        });
+      }
     }
 
-    return NextResponse.json({ respuesta });
+    if (!reply) {
+      reply =
+        toolsExecuted.length > 0
+          ? "Listo, he aplicado los cambios que pedías."
+          : "No he podido generar una respuesta; prueba de nuevo.";
+    }
+
+    return NextResponse.json({ reply, toolsExecuted, respuesta: reply });
   } catch (e) {
     console.error("POST /api/agent:", e);
     return NextResponse.json({ error: "Error interno del agente" }, { status: 500 });
