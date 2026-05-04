@@ -560,18 +560,51 @@ export default function Home() {
         {/* Agenda */}
         <section>
           <p style={{ ...sectionLabel }}>Agenda familiar</p>
-          <p
+          <div
             style={{
               margin: 0,
               padding: "0 20px",
               marginBottom: 10,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#e4e6ed",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
             }}
           >
-            {agendaMonthYear}
-          </p>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#e4e6ed",
+                minWidth: 0,
+              }}
+            >
+              {agendaMonthYear}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setCalendarInitialDate(null);
+                setShowCalendar(true);
+              }}
+              style={{
+                margin: 0,
+                padding: 0,
+                border: "none",
+                background: "transparent",
+                fontSize: "11px",
+                color: "rgba(76,201,160,0.6)",
+                fontFamily: "monospace",
+                letterSpacing: "1px",
+                cursor: "pointer",
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Ver calendario →
+            </button>
+          </div>
           <div
             style={{
               display: "flex",
