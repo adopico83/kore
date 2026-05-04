@@ -5,6 +5,7 @@ import { CorchoChat } from "@/components/CorchoChat";
 import { CorchoHistorial } from "@/components/CorchoHistorial";
 import { DomainModal, type DomainItem } from "@/components/DomainModal";
 import { EconomiaModal, LS_KORE_EXPENSES, type ExpenseItem } from "@/components/EconomiaModal";
+import { PerfilModal, type PerfilNavigateTipo, type PerfilUsuario } from "@/components/PerfilModal";
 import { SaludResumenModal } from "@/components/SaludResumenModal";
 import { LS_KORE_SALUD, SaludModal, type SaludData } from "@/components/SaludModal";
 import {
@@ -16,6 +17,33 @@ import { useEffect, useMemo, useState } from "react";
 
 const LS_KORE_AGENDA = "kore_calendar_events";
 const LS_KORE_DOMAINS = "kore_domains_state";
+const LS_KORE_STRESS_ANDER = "kore_stress_ander";
+const LS_KORE_STRESS_LEIRE = "kore_stress_leire";
+
+function readStressFromLs(key: string): number {
+  if (typeof window === "undefined") return 5;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null || raw === "") return 5;
+    const n = Number(raw);
+    if (Number.isNaN(n)) return 5;
+    return Math.min(10, Math.max(1, Math.round(n)));
+  } catch {
+    return 5;
+  }
+}
+
+function avatarStressBorder(level: number): string {
+  if (level <= 4) return "#10b981";
+  if (level <= 7) return "#f59e0b";
+  return "#E05555";
+}
+
+function avatarStressShadow(level: number): string {
+  if (level <= 4) return "0 0 12px rgba(16, 185, 129, 0.3)";
+  if (level <= 7) return "0 0 12px rgba(245, 158, 11, 0.3)";
+  return "0 0 12px rgba(224, 85, 85, 0.35)";
+}
 
 function readAgendaFromLs(): KoreAgendaEvent[] {
   if (typeof window === "undefined") return [];
@@ -92,33 +120,6 @@ const cardShell: CSSProperties = {
   margin: "16px",
   color: C.text,
 };
-
-function Waveform() {
-  const heights = [4, 12, 7, 16, 9, 14, 6, 11, 5, 13, 8, 10];
-  return (
-    <div
-      style={{
-        display: "flex",
-        height: 32,
-        alignItems: "center",
-        gap: 2,
-      }}
-      aria-label="Nota de voz"
-    >
-      {heights.map((h, i) => (
-        <span
-          key={i}
-          style={{
-            width: 2,
-            borderRadius: 999,
-            backgroundColor: C.purple,
-            height: h,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
 
 type WeekDay = {
   key: string;
@@ -255,6 +256,8 @@ export default function Home() {
   const [showEconomia, setShowEconomia] = useState(false);
   const [showSalud, setShowSalud] = useState(false);
   const [showSaludResumen, setShowSaludResumen] = useState(false);
+  const [showPerfil, setShowPerfil] = useState(false);
+  const [usuarioPerfil, setUsuarioPerfil] = useState<PerfilUsuario>("Ander");
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>([]);
@@ -270,15 +273,19 @@ export default function Home() {
     Ander: { citas: [], medicaciones: [] },
     Leire: { citas: [], medicaciones: [] },
   });
-  const [anderStress, setAnderStress] = useState(9);
-  const [leireStress, setLeireStress] = useState(8);
+  const [anderStress, setAnderStress] = useState(5);
+  const [leireStress, setLeireStress] = useState(5);
 
   useEffect(() => {
-    setAgendaEvents(readAgendaFromLs());
-    setAgendaHydrated(true);
-    setDomains(readDomainsFromLs());
-    setExpenses(readExpensesFromLs());
-    setSalud(readSaludFromLs());
+    queueMicrotask(() => {
+      setAgendaEvents(readAgendaFromLs());
+      setAgendaHydrated(true);
+      setDomains(readDomainsFromLs());
+      setExpenses(readExpensesFromLs());
+      setSalud(readSaludFromLs());
+      setAnderStress(readStressFromLs(LS_KORE_STRESS_ANDER));
+      setLeireStress(readStressFromLs(LS_KORE_STRESS_LEIRE));
+    });
   }, []);
 
   useEffect(() => {
@@ -291,7 +298,7 @@ export default function Home() {
   }, [agendaEvents, agendaHydrated]);
 
   const weekDays = useMemo(() => buildWeekDays(new Date(), agendaEvents), [agendaEvents]);
-  const agendaMonthYear = useMemo(() => formatMesAnioEs(new Date()), [agendaEvents]);
+  const agendaMonthYear = useMemo(() => formatMesAnioEs(new Date()), []);
   const activeDomain = useMemo(
     () => (activeDomainName ? domains.find((d) => d.name === activeDomainName) ?? null : null),
     [activeDomainName, domains],
@@ -355,6 +362,21 @@ export default function Home() {
     }
     setActiveDomainName(null);
   };
+
+  /** Cierra el perfil y abre el destino (dominio vía `activeDomainName`; salud → resumen). */
+  const handlePerfilNavigate = (tipo: PerfilNavigateTipo, id: string) => {
+    setShowPerfil(false);
+    if (tipo === "domain") {
+      const selectedDomain = domains.find((d) => d.id === id);
+      if (selectedDomain) {
+        setActiveDomainName(selectedDomain.name);
+      }
+    }
+    if (tipo === "salud") {
+      setShowSaludResumen(true);
+    }
+  };
+
   const stressSum = anderStress + leireStress;
   const survival = stressSum > 16;
 
@@ -442,51 +464,84 @@ export default function Home() {
             flex: 1,
             minWidth: 0,
             display: "flex",
+            flexDirection: "column",
             justifyContent: "center",
             alignItems: "center",
             padding: "0 4px",
+            gap: 2,
           }}
         >
           <p
             style={{
               margin: 0,
-              fontSize: 11,
+              fontSize: 9,
               fontFamily: "ui-monospace, monospace",
-              color: "rgba(228, 230, 237, 0.55)",
-              letterSpacing: "1px",
+              color: "rgba(228, 230, 237, 0.45)",
+              letterSpacing: "2px",
               textAlign: "center",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
+              textTransform: "uppercase",
+              lineHeight: 1.2,
             }}
           >
-            Familia Dopico · Gómez
+            Dopico
+          </p>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 9,
+              fontFamily: "ui-monospace, monospace",
+              color: "rgba(228, 230, 237, 0.45)",
+              letterSpacing: "2px",
+              textAlign: "center",
+              textTransform: "uppercase",
+              lineHeight: 1.2,
+            }}
+          >
+            Gómez
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", flexShrink: 0, position: "relative" }}>
-          <span
+          <button
+            type="button"
+            aria-label="Perfil de Ander"
+            onClick={() => {
+              setUsuarioPerfil("Ander");
+              setShowPerfil(true);
+            }}
             style={{
               ...avatarBase,
               position: "relative",
               zIndex: 1,
-              borderColor: "#10b981",
-              boxShadow: "0 0 12px rgba(16, 185, 129, 0.3)",
+              borderColor: avatarStressBorder(anderStress),
+              boxShadow: avatarStressShadow(anderStress),
+              cursor: "pointer",
+              padding: 0,
+              font: "inherit",
             }}
           >
             A
-          </span>
-          <span
+          </button>
+          <button
+            type="button"
+            aria-label="Perfil de Leire"
+            onClick={() => {
+              setUsuarioPerfil("Leire");
+              setShowPerfil(true);
+            }}
             style={{
               ...avatarBase,
               position: "relative",
               zIndex: 2,
-              borderColor: "#f59e0b",
-              boxShadow: "0 0 12px rgba(245, 158, 11, 0.3)",
+              borderColor: avatarStressBorder(leireStress),
+              boxShadow: avatarStressShadow(leireStress),
               marginLeft: -10,
+              cursor: "pointer",
+              padding: 0,
+              font: "inherit",
             }}
           >
             L
-          </span>
+          </button>
         </div>
       </header>
 
@@ -1251,7 +1306,17 @@ export default function Home() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <button
               type="button"
-              onClick={() => setAnderStress((n) => (n >= 15 ? 1 : n + 1))}
+              onClick={() =>
+                setAnderStress((n) => {
+                  const next = n >= 10 ? 1 : n + 1;
+                  try {
+                    localStorage.setItem(LS_KORE_STRESS_ANDER, String(next));
+                  } catch {
+                    /* ignore */
+                  }
+                  return next;
+                })
+              }
               style={{
                 display: "block",
                 width: "100%",
@@ -1281,14 +1346,24 @@ export default function Home() {
                     height: "100%",
                     borderRadius: 999,
                     background: C.green,
-                    width: `${(anderStress / 15) * 100}%`,
+                    width: `${(anderStress / 10) * 100}%`,
                   }}
                 />
               </div>
             </button>
             <button
               type="button"
-              onClick={() => setLeireStress((n) => (n >= 15 ? 1 : n + 1))}
+              onClick={() =>
+                setLeireStress((n) => {
+                  const next = n >= 10 ? 1 : n + 1;
+                  try {
+                    localStorage.setItem(LS_KORE_STRESS_LEIRE, String(next));
+                  } catch {
+                    /* ignore */
+                  }
+                  return next;
+                })
+              }
               style={{
                 display: "block",
                 width: "100%",
@@ -1318,7 +1393,7 @@ export default function Home() {
                     height: "100%",
                     borderRadius: 999,
                     background: C.purple,
-                    width: `${(leireStress / 15) * 100}%`,
+                    width: `${(leireStress / 10) * 100}%`,
                   }}
                 />
               </div>
@@ -1416,6 +1491,33 @@ export default function Home() {
         <SaludResumenModal
           onClose={() => setShowSaludResumen(false)}
           onChange={(next) => setSalud(next)}
+        />
+      ) : null}
+      {showPerfil ? (
+        <PerfilModal
+          usuario={usuarioPerfil}
+          onClose={() => setShowPerfil(false)}
+          domains={domains}
+          saludMember={salud[usuarioPerfil]}
+          stressLevel={usuarioPerfil === "Ander" ? anderStress : leireStress}
+          onStressChange={(n) => {
+            if (usuarioPerfil === "Ander") {
+              setAnderStress(n);
+              try {
+                localStorage.setItem(LS_KORE_STRESS_ANDER, String(n));
+              } catch {
+                /* ignore */
+              }
+            } else {
+              setLeireStress(n);
+              try {
+                localStorage.setItem(LS_KORE_STRESS_LEIRE, String(n));
+              } catch {
+                /* ignore */
+              }
+            }
+          }}
+          onNavigate={handlePerfilNavigate}
         />
       ) : null}
       {activeDomain ? (
