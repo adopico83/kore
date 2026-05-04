@@ -34,7 +34,7 @@ const C = {
   card: "#161a22",
   text: "#e4e6ed",
   muted: "rgba(228, 230, 237, 0.45)",
-  label: "rgba(228, 230, 237, 0.18)",
+  label: "rgba(228, 230, 237, 0.45)",
   border: "0.5px solid rgba(255, 255, 255, 0.07)",
   green: "#4CC9A0",
   purple: "#9B8FE8",
@@ -43,12 +43,13 @@ const C = {
 } as const;
 
 const sectionLabel: CSSProperties = {
-  fontSize: "8.5px",
+  fontSize: "10px",
   fontFamily: "ui-monospace, monospace",
   letterSpacing: "2px",
   textTransform: "uppercase",
+  fontWeight: 600,
   color: C.label,
-  margin: "0 16px 10px",
+  margin: "0 16px 14px",
 };
 
 const cardShell: CSSProperties = {
@@ -100,6 +101,24 @@ function ymdParts(d: Date) {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
+function formatMesAnioEs(d: Date) {
+  const meses = [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+  ];
+  return `${meses[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 function ymdIso(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -119,7 +138,7 @@ function buildWeekDays(reference: Date, events: KoreAgendaEvent[]): WeekDay[] {
   monday.setHours(12, 0, 0, 0);
   monday.setDate(d.getDate() + mondayOffset);
 
-  const labels = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"];
+  const labels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
   const todayKey = ymdParts(reference);
 
   return labels.map((label, i) => {
@@ -196,6 +215,7 @@ export default function Home() {
   }, [agendaEvents, agendaHydrated]);
 
   const weekDays = useMemo(() => buildWeekDays(new Date(), agendaEvents), [agendaEvents]);
+  const agendaMonthYear = useMemo(() => formatMesAnioEs(new Date()), [agendaEvents]);
   const stressSum = anderStress + leireStress;
   const survival = stressSum > 16;
 
@@ -259,7 +279,7 @@ export default function Home() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, minWidth: 0 }}>
-          <svg width="32" height="32" viewBox="0 0 160 160" fill="none" aria-hidden style={{ flexShrink: 0 }}>
+          <svg width="40" height="40" viewBox="0 0 160 160" fill="none" aria-hidden style={{ flexShrink: 0 }}>
             <rect width="160" height="160" rx="36" fill="#0b0d13" />
             <circle cx="68" cy="80" r="36" stroke="#4CC9A0" strokeWidth="1.8" fill="none" />
             <circle cx="96" cy="80" r="36" stroke="#9B8FE8" strokeWidth="1.8" fill="none" />
@@ -269,7 +289,7 @@ export default function Home() {
           <p
             style={{
               margin: 0,
-              fontSize: 22,
+              fontSize: 26,
               fontWeight: 700,
               color: "#e4e6ed",
               lineHeight: 1.1,
@@ -291,9 +311,9 @@ export default function Home() {
           <p
             style={{
               margin: 0,
-              fontSize: 9,
+              fontSize: 11,
               fontFamily: "ui-monospace, monospace",
-              color: "rgba(228, 230, 237, 0.35)",
+              color: "rgba(228, 230, 237, 0.55)",
               letterSpacing: "1px",
               textAlign: "center",
               whiteSpace: "nowrap",
@@ -338,14 +358,26 @@ export default function Home() {
           overflowY: "auto",
           width: "100%",
           margin: 0,
-          paddingTop: 88,
+          paddingTop: 96,
           paddingBottom: 120,
           boxSizing: "border-box",
         }}
       >
         {/* Agenda */}
         <section>
-          <p style={{ ...sectionLabel, marginBottom: 10 }}>Agenda familiar</p>
+          <p style={{ ...sectionLabel }}>Agenda familiar</p>
+          <p
+            style={{
+              margin: 0,
+              padding: "0 20px",
+              marginBottom: 10,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#e4e6ed",
+            }}
+          >
+            {agendaMonthYear}
+          </p>
           <div
             style={{
               display: "flex",
@@ -359,6 +391,7 @@ export default function Home() {
               <button
                 key={day.key}
                 type="button"
+                aria-current={day.isToday ? "date" : undefined}
                 onClick={() => {
                   setCalendarInitialDate(day.date);
                   setShowCalendar(true);
@@ -368,9 +401,9 @@ export default function Home() {
                   flexDirection: "column",
                   alignItems: "center",
                   gap: 8,
-                  background: day.isToday ? "rgba(76, 201, 160, 0.08)" : "#161a22",
+                  background: day.isToday ? "rgba(76, 201, 160, 0.12)" : "#161a22",
                   border: day.isToday
-                    ? "0.5px solid rgba(76, 201, 160, 0.3)"
+                    ? "1.5px solid rgba(76, 201, 160, 0.55)"
                     : "0.5px solid rgba(255, 255, 255, 0.07)",
                   borderRadius: 12,
                   padding: "10px 12px",
@@ -380,19 +413,52 @@ export default function Home() {
                   cursor: "pointer",
                   color: "inherit",
                   font: "inherit",
+                  boxShadow: day.isToday ? "0 0 16px rgba(76, 201, 160, 0.2)" : undefined,
                 }}
               >
                 <span
                   style={{
                     fontFamily: "ui-monospace, monospace",
-                    fontSize: 9,
-                    textTransform: "uppercase",
-                    color: C.muted,
+                    fontSize: 11,
+                    fontWeight: day.isToday ? 700 : 500,
+                    letterSpacing: "0.02em",
+                    color: day.isToday ? C.green : C.muted,
                   }}
                 >
                   {day.label}
                 </span>
-                <span style={{ fontSize: 18, fontWeight: 600, color: C.text }}>{day.num}</span>
+                <span
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: day.isToday ? C.green : C.text,
+                  }}
+                >
+                  {day.num}
+                </span>
+                <div
+                  style={{
+                    minHeight: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {day.isToday ? (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        fontFamily: "ui-monospace, monospace",
+                        letterSpacing: "0.12em",
+                        textTransform: "uppercase",
+                        color: C.green,
+                      }}
+                    >
+                      Hoy
+                    </span>
+                  ) : null}
+                </div>
                 <div style={{ display: "flex", height: 8, alignItems: "center", gap: 4 }}>
                   {day.dots.map((c, i) => (
                     <span
@@ -807,7 +873,7 @@ export default function Home() {
 
         {/* El corcho */}
         <section>
-          <p style={{ ...sectionLabel, marginBottom: 10 }}>El corcho</p>
+          <p style={{ ...sectionLabel }}>El corcho</p>
           <div style={{ padding: "0 16px 16px", boxSizing: "border-box" }}>
             <div
               style={{
