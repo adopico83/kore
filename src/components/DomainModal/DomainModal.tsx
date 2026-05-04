@@ -1,0 +1,303 @@
+"use client";
+
+import type { CSSProperties } from "react";
+import { useState } from "react";
+
+export type DomainItem = {
+  id: string;
+  name: string;
+  owner: string;
+  state: string;
+  emoji: string;
+  notes: string[];
+};
+
+export type DomainModalProps = {
+  domain: DomainItem;
+  onClose: () => void;
+  onSave: (next: Pick<DomainItem, "owner" | "state" | "notes">) => void;
+};
+
+const cardStyle: CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.08)",
+  background: "#161a22",
+  padding: 12,
+};
+
+export function DomainModal({ domain, onClose, onSave }: DomainModalProps) {
+  const [owner, setOwner] = useState(domain.owner);
+  const [stateText, setStateText] = useState(domain.state);
+  const [notes, setNotes] = useState<string[]>(domain.notes ?? []);
+  const [newNote, setNewNote] = useState("");
+  const [history, setHistory] = useState<Array<{ id: string; at: string; text: string }>>(() => {
+    try {
+      const raw = localStorage.getItem(`kore_domain_history_${domain.id}`);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as Array<{ id: string; at: string; text: string }>;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const removeHistoryEntry = (entryId: string) => {
+    const next = history.filter((h) => h.id !== entryId);
+    setHistory(next);
+    try {
+      localStorage.setItem(`kore_domain_history_${domain.id}`, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Dominio ${domain.name}`}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 8100,
+        background: "#090b10",
+        color: "#e4e6ed",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          padding: "12px",
+        }}
+      >
+        <p style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+          {domain.emoji} {domain.name}
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Cerrar dominio"
+          style={{
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.1)",
+            background: "transparent",
+            color: "#fff",
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            width: 36,
+            height: 36,
+          }}
+        >
+          ×
+        </button>
+      </header>
+
+      <main style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>
+        <section style={cardStyle}>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Lo lleva:</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            {["Ander", "Leire"].map((name) => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => setOwner(name)}
+                style={{
+                  borderRadius: 999,
+                  border: owner === name ? "1px solid #9B8FE8" : "1px solid rgba(255,255,255,0.15)",
+                  background: owner === name ? "rgba(155,143,232,0.2)" : "rgba(255,255,255,0.05)",
+                  color: "#e4e6ed",
+                  padding: "6px 12px",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section style={cardStyle}>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Estado</p>
+          <input
+            value={stateText}
+            onChange={(e) => setStateText(e.target.value)}
+            style={{
+              width: "100%",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.05)",
+              color: "#e4e6ed",
+              padding: "8px 10px",
+              fontSize: 14,
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+        </section>
+
+        <section style={cardStyle}>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Notas / Tareas</p>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <input
+              value={newNote}
+              onChange={(e) => setNewNote(e.target.value)}
+              placeholder="Añadir item"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.05)",
+                color: "#e4e6ed",
+                padding: "8px 10px",
+                fontSize: 14,
+                outline: "none",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const value = newNote.trim();
+                if (!value) return;
+                setNotes((prev) => [...prev, value]);
+                setNewNote("");
+              }}
+              style={{
+                borderRadius: 8,
+                border: "none",
+                background: "#4CC9A0",
+                color: "#0a1a14",
+                padding: "0 12px",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Añadir
+            </button>
+          </div>
+          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+            {notes.map((note, i) => (
+              <li
+                key={`${note}-${i}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.04)",
+                  padding: "7px 9px",
+                }}
+              >
+                <span style={{ fontSize: 13 }}>{note}</span>
+                <button
+                  type="button"
+                  onClick={() => setNotes((prev) => prev.filter((_, idx) => idx !== i))}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "rgba(228,230,237,0.65)",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    lineHeight: 1,
+                  }}
+                  aria-label="Eliminar nota"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section style={cardStyle}>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Historial</p>
+          {history.length === 0 ? (
+            <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Sin registros aún</p>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+              {history
+                .slice()
+                .reverse()
+                .map((entry) => {
+                  const d = new Date(entry.at);
+                  const fecha = Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("es-ES");
+                  const hora = Number.isNaN(d.getTime())
+                    ? ""
+                    : d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false });
+                  return (
+                    <li
+                      key={entry.id}
+                      style={{
+                        borderRadius: 8,
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        background: "rgba(255,255,255,0.04)",
+                        padding: "8px 9px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: 11, color: "rgba(228,230,237,0.55)" }}>
+                          {fecha} {hora}
+                        </p>
+                        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#e4e6ed", whiteSpace: "pre-wrap" }}>
+                          {entry.text}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeHistoryEntry(entry.id)}
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: "rgba(228,230,237,0.65)",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          lineHeight: 1,
+                          flexShrink: 0,
+                        }}
+                        aria-label="Eliminar entrada del historial"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
+        </section>
+      </main>
+
+      <footer style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: 12 }}>
+        <button
+          type="button"
+          onClick={() => onSave({ owner, state: stateText.trim(), notes })}
+          style={{
+            width: "100%",
+            borderRadius: 10,
+            border: "none",
+            background: "#4CC9A0",
+            color: "#0a1a14",
+            padding: "11px 12px",
+            fontSize: 15,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Guardar
+        </button>
+      </footer>
+    </div>
+  );
+}

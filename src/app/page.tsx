@@ -2,6 +2,11 @@
 
 import { AgentChat } from "@/components/AgentChat/AgentChat";
 import { CorchoChat } from "@/components/CorchoChat";
+import { CorchoHistorial } from "@/components/CorchoHistorial";
+import { DomainModal, type DomainItem } from "@/components/DomainModal";
+import { EconomiaModal, LS_KORE_EXPENSES, type ExpenseItem } from "@/components/EconomiaModal";
+import { SaludResumenModal } from "@/components/SaludResumenModal";
+import { LS_KORE_SALUD, SaludModal, type SaludData } from "@/components/SaludModal";
 import {
   CalendarModal,
   type KoreAgendaEvent,
@@ -10,6 +15,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 const LS_KORE_AGENDA = "kore_calendar_events";
+const LS_KORE_DOMAINS = "kore_domains_state";
 
 function readAgendaFromLs(): KoreAgendaEvent[] {
   if (typeof window === "undefined") return [];
@@ -27,6 +33,31 @@ function readAgendaFromLs(): KoreAgendaEvent[] {
     );
   } catch {
     return [];
+  }
+}
+
+function readExpensesFromLs(): ExpenseItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LS_KORE_EXPENSES);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ExpenseItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readSaludFromLs(): SaludData {
+  if (typeof window === "undefined") return { Peque: { citas: [], medicaciones: [] }, Ander: { citas: [], medicaciones: [] }, Leire: { citas: [], medicaciones: [] } };
+  try {
+    const raw = localStorage.getItem(LS_KORE_SALUD);
+    if (!raw) return { Peque: { citas: [], medicaciones: [] }, Ander: { citas: [], medicaciones: [] }, Leire: { citas: [], medicaciones: [] } };
+    const parsed = JSON.parse(raw) as SaludData;
+    if (!parsed?.Peque || !parsed?.Ander || !parsed?.Leire) return { Peque: { citas: [], medicaciones: [] }, Ander: { citas: [], medicaciones: [] }, Leire: { citas: [], medicaciones: [] } };
+    return parsed;
+  } catch {
+    return { Peque: { citas: [], medicaciones: [] }, Ander: { citas: [], medicaciones: [] }, Leire: { citas: [], medicaciones: [] } };
   }
 }
 
@@ -158,6 +189,7 @@ function buildWeekDays(reference: Date, events: KoreAgendaEvent[]): WeekDay[] {
 }
 
 type DomainCard = {
+  id: string;
   name: string;
   owner: string;
   weight: number;
@@ -165,14 +197,16 @@ type DomainCard = {
   state: string;
   line: string;
   agent?: string;
+  notes?: string[];
 };
 
 const DOMAINS: DomainCard[] = [
-  { name: "Menú", owner: "Ander", weight: 8, emoji: "🍽️", state: "En curso", line: "#4CC9A0" },
-  { name: "Sueño", owner: "Leire", weight: 15, emoji: "😴", state: "Prioritario", line: "#9B8FE8" },
-  { name: "Limpieza", owner: "Leire", weight: 5, emoji: "🧹", state: "OK", line: "#EF9F27" },
-  { name: "Compras", owner: "Ander", weight: 4, emoji: "🛒", state: "Pendiente", line: "#4CC9A0" },
+  { id: "menu", name: "Menú", owner: "Ander", weight: 8, emoji: "🍽️", state: "En curso", line: "#4CC9A0", notes: ["Revisar nevera"] },
+  { id: "sueno", name: "Sueño", owner: "Leire", weight: 15, emoji: "😴", state: "Prioritario", line: "#9B8FE8", notes: ["Acostar antes de 23:00"] },
+  { id: "limpieza", name: "Limpieza", owner: "Leire", weight: 5, emoji: "🧹", state: "OK", line: "#EF9F27", notes: ["Baño principal"] },
+  { id: "compras", name: "Compras", owner: "Ander", weight: 4, emoji: "🛒", state: "Pendiente", line: "#4CC9A0", notes: ["Falta fruta"] },
   {
+    id: "colegio",
     name: "Colegio",
     owner: "Leire",
     weight: 6,
@@ -180,31 +214,60 @@ const DOMAINS: DomainCard[] = [
     state: "Excursión 15 mayo",
     line: "#7F77DD",
     agent: "logistica",
+    notes: ["Firmar autorización"],
   },
 ];
 
-const EXPENSES = [
-  { icon: "🛒", desc: "Mercadona", date: "2 may", amount: "-84,20€" },
-  { icon: "☕", desc: "Cafés semana", date: "1 may", amount: "-32,50€" },
-  { icon: "🧸", desc: "Juguetes Peque", date: "28 abr", amount: "-119,00€" },
+const CORCHO_MESSAGES = [
+  { who: "Leire", avatar: "L", ownerColor: "#f59e0b", text: "Te dejo un audio sobre la reunión del cole.", when: "Hace 12 min" },
+  { who: "Ander", avatar: "A", ownerColor: "#10b981", text: "¿Puedes recoger pan antes de las 19:00?", when: "Ayer 21:40" },
+  { who: "Leire", avatar: "L", ownerColor: "#f59e0b", text: "Mañana revisamos menú de la semana.", when: "Ayer 20:15" },
 ];
+
+function readDomainsFromLs(): DomainCard[] {
+  if (typeof window === "undefined") return DOMAINS;
+  try {
+    const raw = localStorage.getItem(LS_KORE_DOMAINS);
+    if (!raw) return DOMAINS;
+    const parsed = JSON.parse(raw) as DomainCard[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return DOMAINS;
+    return parsed;
+  } catch {
+    return DOMAINS;
+  }
+}
 
 export default function Home() {
   const [showAgent, setShowAgent] = useState(false);
   const [showCorcho, setShowCorcho] = useState(false);
+  const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
+  const [showEconomia, setShowEconomia] = useState(false);
+  const [showSalud, setShowSalud] = useState(false);
+  const [showSaludResumen, setShowSaludResumen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>([]);
   const [agendaHydrated, setAgendaHydrated] = useState(false);
 
   const [domainsOpen, setDomainsOpen] = useState(true);
+  const [domains, setDomains] = useState<DomainCard[]>(DOMAINS);
+  const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [healthOpen, setHealthOpen] = useState(false);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  const [salud, setSalud] = useState<SaludData>({
+    Peque: { citas: [], medicaciones: [] },
+    Ander: { citas: [], medicaciones: [] },
+    Leire: { citas: [], medicaciones: [] },
+  });
   const [anderStress, setAnderStress] = useState(9);
   const [leireStress, setLeireStress] = useState(8);
 
   useEffect(() => {
     setAgendaEvents(readAgendaFromLs());
     setAgendaHydrated(true);
+    setDomains(readDomainsFromLs());
+    setExpenses(readExpensesFromLs());
+    setSalud(readSaludFromLs());
   }, []);
 
   useEffect(() => {
@@ -218,6 +281,69 @@ export default function Home() {
 
   const weekDays = useMemo(() => buildWeekDays(new Date(), agendaEvents), [agendaEvents]);
   const agendaMonthYear = useMemo(() => formatMesAnioEs(new Date()), [agendaEvents]);
+  const activeDomain = useMemo(
+    () => (activeDomainName ? domains.find((d) => d.name === activeDomainName) ?? null : null),
+    [activeDomainName, domains],
+  );
+  const economia = useMemo(() => {
+    const now = new Date();
+    const monthItems = expenses.filter((it) => {
+      const d = new Date(it.at);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    });
+    const totalMes = monthItems.reduce((acc, it) => acc + Math.abs(it.amount), 0);
+    const sharedItems = expenses.filter((it) => it.shared);
+    const totalShared = sharedItems.reduce((acc, it) => acc + Math.abs(it.amount), 0);
+    const paidAnder = sharedItems
+      .filter((it) => it.paidBy === "Ander")
+      .reduce((acc, it) => acc + Math.abs(it.amount), 0);
+    const paidLeire = sharedItems
+      .filter((it) => it.paidBy === "Leire")
+      .reduce((acc, it) => acc + Math.abs(it.amount), 0);
+    const half = totalShared / 2;
+    return {
+      totalMes,
+      debeAnder: Math.max(0, half - paidAnder),
+      debeLeire: Math.max(0, half - paidLeire),
+    };
+  }, [expenses]);
+  const saludPendientes = useMemo(
+    () =>
+      salud.Peque.citas.length +
+      salud.Peque.medicaciones.length +
+      salud.Ander.citas.length +
+      salud.Ander.medicaciones.length +
+      salud.Leire.citas.length +
+      salud.Leire.medicaciones.length,
+    [salud],
+  );
+  const handleSaveDomain = (next: Pick<DomainItem, "owner" | "state" | "notes">) => {
+    if (!activeDomainName) return;
+    const updated = domains.map((d) =>
+      d.name === activeDomainName ? { ...d, owner: next.owner, state: next.state, notes: next.notes } : d,
+    );
+    setDomains(updated);
+    try {
+      localStorage.setItem(LS_KORE_DOMAINS, JSON.stringify(updated));
+      const changed = updated.find((d) => d.name === activeDomainName);
+      if (changed) {
+        const key = `kore_domain_history_${changed.id}`;
+        const raw = localStorage.getItem(key);
+        const list = raw ? (JSON.parse(raw) as Array<{ id: string; at: string; text: string }>) : [];
+        const entry = {
+          id: crypto.randomUUID?.() ?? `hist_${Date.now()}`,
+          at: new Date().toISOString(),
+          text: `Owner: ${next.owner} · Estado: ${next.state || "Sin estado"}${
+            next.notes.length ? ` · Nota: ${next.notes[next.notes.length - 1]}` : ""
+          }`,
+        };
+        localStorage.setItem(key, JSON.stringify([...(Array.isArray(list) ? list : []), entry]));
+      }
+    } catch {
+      /* ignore */
+    }
+    setActiveDomainName(null);
+  };
   const stressSum = anderStress + leireStress;
   const survival = stressSum > 16;
 
@@ -519,9 +645,11 @@ export default function Home() {
                   gap: 8,
                 }}
               >
-                {DOMAINS.slice(0, 4).map((d) => (
-                  <div
+                {domains.slice(0, 4).map((d) => (
+                  <button
                     key={d.name}
+                    type="button"
+                    onClick={() => setActiveDomainName(d.name)}
                     style={{
                       position: "relative",
                       overflow: "hidden",
@@ -530,6 +658,10 @@ export default function Home() {
                       padding: 12,
                       border: "0.5px solid rgba(255, 255, 255, 0.07)",
                       boxSizing: "border-box",
+                      textAlign: "left",
+                      color: C.text,
+                      cursor: "pointer",
+                      font: "inherit",
                     }}
                   >
                     <div
@@ -568,6 +700,20 @@ export default function Home() {
                       </div>
                       <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: C.text }}>{d.name}</p>
                       <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>{d.state}</p>
+                      {d.notes && d.notes.length > 0 ? (
+                        <p
+                          style={{
+                            margin: "4px 0 0",
+                            fontSize: 11,
+                            color: C.muted,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {d.notes[d.notes.length - 1]}
+                        </p>
+                      ) : null}
                       {d.agent ? (
                         <p
                           style={{
@@ -611,10 +757,10 @@ export default function Home() {
                         {d.weight}/15
                       </p>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
-              {DOMAINS.slice(4).map((d) => (
+              {domains.slice(4).map((d) => (
                 <div
                   key={d.name}
                   style={{
@@ -625,7 +771,9 @@ export default function Home() {
                     marginRight: "auto",
                   }}
                 >
-                  <div
+                  <button
+                    type="button"
+                    onClick={() => setActiveDomainName(d.name)}
                     style={{
                       position: "relative",
                       overflow: "hidden",
@@ -634,6 +782,11 @@ export default function Home() {
                       padding: 12,
                       border: "0.5px solid rgba(255, 255, 255, 0.07)",
                       boxSizing: "border-box",
+                      width: "100%",
+                      textAlign: "left",
+                      color: C.text,
+                      cursor: "pointer",
+                      font: "inherit",
                     }}
                   >
                     <div
@@ -672,6 +825,20 @@ export default function Home() {
                       </div>
                       <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: C.text }}>{d.name}</p>
                       <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>{d.state}</p>
+                      {d.notes && d.notes.length > 0 ? (
+                        <p
+                          style={{
+                            margin: "4px 0 0",
+                            fontSize: 11,
+                            color: C.muted,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {d.notes[d.notes.length - 1]}
+                        </p>
+                      ) : null}
                       {d.agent ? (
                         <p
                           style={{
@@ -715,7 +882,7 @@ export default function Home() {
                         {d.weight}/15
                       </p>
                     </div>
-                  </div>
+                  </button>
                 </div>
               ))}
             </div>
@@ -730,9 +897,7 @@ export default function Home() {
             overflow: "hidden",
           }}
         >
-          <button
-            type="button"
-            onClick={() => setHealthOpen((o) => !o)}
+          <div
             style={{
               display: "flex",
               width: "100%",
@@ -740,19 +905,35 @@ export default function Home() {
               gap: 12,
               padding: 14,
               textAlign: "left",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
               color: C.text,
             }}
           >
-            <span style={{ fontSize: 24 }} aria-hidden>
-              🏥
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>Salud familiar</p>
-              <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>Citas y medicación</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowSalud(true)}
+              style={{
+                display: "flex",
+                flex: 1,
+                minWidth: 0,
+                alignItems: "center",
+                gap: 12,
+                background: "none",
+                border: "none",
+                color: "inherit",
+                textAlign: "left",
+                cursor: "pointer",
+                padding: 0,
+                font: "inherit",
+              }}
+            >
+              <span style={{ fontSize: 24 }} aria-hidden>
+                🏥
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>Salud familiar</p>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>Citas y medicación</p>
+              </div>
+            </button>
             <span
               style={{
                 borderRadius: 999,
@@ -764,12 +945,26 @@ export default function Home() {
                 flexShrink: 0,
               }}
             >
-              3 pendientes
+              {saludPendientes} pendientes
             </span>
-            <span style={{ color: C.muted, flexShrink: 0 }} aria-hidden>
+            <button
+              type="button"
+              onClick={() => setHealthOpen((o) => !o)}
+              aria-label={healthOpen ? "Contraer salud" : "Expandir salud"}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: C.muted,
+                cursor: "pointer",
+                padding: 0,
+                fontSize: 14,
+                lineHeight: 1,
+              }}
+            >
               {healthOpen ? "▼" : "▶"}
-            </span>
-          </button>
+            </button>
+          </div>
+
           {healthOpen ? (
             <div
               style={{
@@ -777,98 +972,79 @@ export default function Home() {
                 padding: "12px 14px 16px",
                 display: "flex",
                 flexDirection: "column",
-                gap: 16,
+                gap: 12,
               }}
             >
-              <div>
-                <p
-                  style={{
-                    margin: "0 0 8px",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    color: C.green,
-                  }}
-                >
-                  Peque
-                </p>
-                <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-                  <li
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      borderLeft: `2px solid ${C.green}`,
-                      paddingLeft: 8,
-                      fontSize: 14,
-                      color: C.text,
-                    }}
+              {(["Peque", "Ander", "Leire"] as const).map((member) => {
+                const citas = salud[member].citas;
+                const meds = salud[member].medicaciones;
+                return (
+                  <div
+                    key={member}
+                    onClick={() => setShowSaludResumen(true)}
+                    style={{ cursor: "pointer" }}
                   >
-                    <span>Apiretal</span>
-                    <span style={{ flexShrink: 0, color: C.muted, fontSize: 13 }}>próx. 12:30</span>
-                  </li>
-                  <li
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      borderLeft: `2px solid ${C.purple}`,
-                      paddingLeft: 8,
-                      fontSize: 14,
-                      color: C.text,
-                    }}
-                  >
-                    <span>Pediatra</span>
-                    <span style={{ flexShrink: 0, color: C.muted, fontSize: 13 }}>Vie 10:00</span>
-                  </li>
-                </ul>
-              </div>
-              <div>
-                <p
-                  style={{
-                    margin: "0 0 8px",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    color: C.muted,
-                  }}
-                >
-                  Ander
-                </p>
-                <p style={{ margin: 0, fontSize: 14, color: C.muted }}>Sin citas próximas</p>
-              </div>
-              <div>
-                <p
-                  style={{
-                    margin: "0 0 8px",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    color: C.amber,
-                  }}
-                >
-                  Leire
-                </p>
-                <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                  <li
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      borderLeft: `2px solid ${C.amber}`,
-                      paddingLeft: 8,
-                      fontSize: 14,
-                      color: C.text,
-                    }}
-                  >
-                    <span>Dentista</span>
-                    <span style={{ flexShrink: 0, color: C.muted, fontSize: 13 }}>28 feb</span>
-                  </li>
-                </ul>
-              </div>
+                    <p
+                      style={{
+                        margin: "0 0 8px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        color: member === "Peque" ? C.green : member === "Leire" ? C.amber : C.muted,
+                      }}
+                    >
+                      {member}
+                    </p>
+                    {citas.length === 0 && meds.length === 0 ? (
+                      <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Sin registros</p>
+                    ) : (
+                      <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+                        {citas.map((c) => (
+                          <li
+                            key={c.id}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 8,
+                              borderLeft: `2px solid ${C.purple}`,
+                              paddingLeft: 8,
+                              fontSize: 13,
+                              color: C.text,
+                            }}
+                          >
+                            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {c.fecha} {c.hora} · {c.descripcion}
+                            </span>
+                          </li>
+                        ))}
+                        {meds.map((m) => {
+                          const dt = m.proximaToma;
+                          const [f, t] = dt.includes("T") ? dt.split("T") : [dt, ""];
+                          return (
+                            <li
+                              key={m.id}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: 8,
+                                borderLeft: `2px solid ${C.green}`,
+                                paddingLeft: 8,
+                                fontSize: 13,
+                                color: C.text,
+                              }}
+                            >
+                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {f} {t} · {m.nombre} ({m.dosis})
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
         </section>
@@ -876,88 +1052,79 @@ export default function Home() {
         {/* El corcho */}
         <section>
           <p style={{ ...sectionLabel }}>El corcho</p>
-          <div style={{ padding: "0 16px 16px", boxSizing: "border-box" }}>
-            <div
-              style={{
-                background: "#161a22",
-                border: "0.5px solid rgba(255,255,255,0.07)",
-                borderRadius: 12,
-                padding: "10px 14px",
-                marginBottom: 6,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                boxSizing: "border-box",
-              }}
-            >
-              <div
-                style={{
-                  ...avatarBase,
-                  width: 40,
-                  height: 40,
-                  flexShrink: 0,
-                  borderColor: "#f59e0b",
-                  background: "#12151c",
-                }}
-              >
-                L
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 600, color: C.text }}>Leire</span>
-                  <span
+          <button
+            type="button"
+            onClick={() => {
+              setShowAgent(false);
+              setShowCorcho(false);
+              setShowCorchoHistorial(true);
+            }}
+            style={{
+              width: "calc(100% - 32px)",
+              margin: "0 16px 16px",
+              padding: 0,
+              border: "none",
+              background: "transparent",
+              textAlign: "left",
+              cursor: "pointer",
+              color: C.text,
+              font: "inherit",
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {CORCHO_MESSAGES.slice(-3).map((msg, idx) => (
+                <div
+                  key={`${msg.who}-${idx}`}
+                  style={{
+                    background: "#161a22",
+                    border: "0.5px solid rgba(255,255,255,0.07)",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <div
                     style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      background: C.green,
+                      ...avatarBase,
+                      width: 30,
+                      height: 30,
+                      fontSize: 11,
                       flexShrink: 0,
+                      borderColor: msg.ownerColor,
+                      background: "#12151c",
                     }}
-                    title="No leído"
-                  />
+                  >
+                    {msg.avatar}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontWeight: 600, color: C.text, fontSize: 11 }}>{msg.who}</p>
+                    <p style={{ margin: "3px 0 0", fontSize: 11, color: C.text, opacity: 0.95 }}>{msg.text}</p>
+                    <p style={{ margin: "3px 0 0", fontSize: 11, color: C.muted }}>{msg.when}</p>
+                  </div>
                 </div>
-                <Waveform />
-                <p style={{ margin: "6px 0 0", fontSize: 12, color: C.muted }}>Hace 12 min</p>
-              </div>
+              ))}
             </div>
-            <div
-              style={{
-                background: "#161a22",
-                border: "0.5px solid rgba(255,255,255,0.07)",
-                borderRadius: 12,
-                padding: "10px 14px",
-                marginBottom: 0,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                boxSizing: "border-box",
-              }}
-            >
-              <div
-                style={{
-                  ...avatarBase,
-                  width: 40,
-                  height: 40,
-                  flexShrink: 0,
-                  borderColor: "#10b981",
-                  background: "#12151c",
-                }}
-              >
-                A
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontWeight: 600, color: C.text }}>Ander</p>
-                <p style={{ margin: "6px 0 0", fontSize: 14, color: C.text, opacity: 0.95 }}>
-                  ¿Puedes recoger pan antes de las 19:00?
-                </p>
-                <p style={{ margin: "6px 0 0", fontSize: 12, color: C.muted }}>Ayer 21:40</p>
-              </div>
-            </div>
-          </div>
+            <p style={{ margin: "8px 4px 0", fontSize: 11, color: "var(--muted)" }}>Ver historial completo →</p>
+          </button>
         </section>
 
         {/* Economía */}
-        <section style={cardShell}>
+        <button
+          type="button"
+          onClick={() => setShowEconomia(true)}
+          style={{
+            ...cardShell,
+            display: "block",
+            width: "calc(100% - 32px)",
+            textAlign: "left",
+            cursor: "pointer",
+            color: C.text,
+            font: "inherit",
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
             <span style={{ fontSize: 22 }} aria-hidden>
               💶
@@ -991,7 +1158,9 @@ export default function Home() {
               >
                 Gastos mes
               </p>
-              <p style={{ margin: "8px 0 0", fontSize: 18, fontWeight: 700, color: C.red }}>−1.240€</p>
+              <p style={{ margin: "8px 0 0", fontSize: 18, fontWeight: 700, color: C.red }}>
+                -{economia.totalMes.toFixed(2).replace(".", ",")}€
+              </p>
             </div>
             <div
               style={{
@@ -1012,13 +1181,15 @@ export default function Home() {
               >
                 Ander debe
               </p>
-              <p style={{ margin: "8px 0 0", fontSize: 18, fontWeight: 700, color: C.green }}>+85€</p>
+              <p style={{ margin: "8px 0 0", fontSize: 18, fontWeight: 700, color: C.green }}>
+                +{economia.debeAnder.toFixed(2).replace(".", ",")}€
+              </p>
             </div>
           </div>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
-            {EXPENSES.map((e) => (
-              <li key={e.desc} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 14 }}>
-                <span style={{ fontSize: 20 }}>{e.icon}</span>
+            {expenses.slice(0, 3).map((e) => (
+              <li key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 14 }}>
+                <span style={{ fontSize: 20 }}>{e.category === "comida" ? "🍽️" : e.category === "hogar" ? "🏠" : e.category === "salud" ? "🏥" : e.category === "ocio" ? "🎯" : e.category === "transporte" ? "🚗" : "🧾"}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p
                     style={{
@@ -1032,13 +1203,17 @@ export default function Home() {
                   >
                     {e.desc}
                   </p>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>{e.date}</p>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
+                    {new Date(e.at).toLocaleDateString("es-ES")}
+                  </p>
                 </div>
-                <span style={{ flexShrink: 0, fontFamily: "ui-monospace, monospace", color: C.red }}>{e.amount}</span>
+                <span style={{ flexShrink: 0, fontFamily: "ui-monospace, monospace", color: C.red }}>
+                  -{Math.abs(e.amount).toFixed(2).replace(".", ",")}€
+                </span>
               </li>
             ))}
           </ul>
-        </section>
+        </button>
 
         {/* Termómetro */}
         <section style={{ ...cardShell, marginBottom: 120 }}>
@@ -1163,6 +1338,7 @@ export default function Home() {
           type="button"
           onClick={() => {
             setShowAgent(false);
+            setShowCorchoHistorial(false);
             setShowCorcho(true);
           }}
           aria-label="Mensaje a Leire"
@@ -1187,6 +1363,7 @@ export default function Home() {
           type="button"
           onClick={() => {
             setShowCorcho(false);
+            setShowCorchoHistorial(false);
             setShowAgent(true);
           }}
           aria-label="ORC / Agente"
@@ -1211,7 +1388,40 @@ export default function Home() {
       </nav>
 
       {showCorcho ? <CorchoChat onClose={() => setShowCorcho(false)} /> : null}
+      {showCorchoHistorial ? <CorchoHistorial onClose={() => setShowCorchoHistorial(false)} /> : null}
       {showAgent ? <AgentChat onClose={() => setShowAgent(false)} /> : null}
+      {showEconomia ? (
+        <EconomiaModal
+          onClose={() => setShowEconomia(false)}
+          onChange={(items) => setExpenses(items)}
+        />
+      ) : null}
+      {showSalud ? (
+        <SaludModal
+          onClose={() => setShowSalud(false)}
+          onChange={(next) => setSalud(next)}
+        />
+      ) : null}
+      {showSaludResumen ? (
+        <SaludResumenModal
+          onClose={() => setShowSaludResumen(false)}
+          onChange={(next) => setSalud(next)}
+        />
+      ) : null}
+      {activeDomain ? (
+        <DomainModal
+          domain={{
+            id: activeDomain.id,
+            name: activeDomain.name,
+            owner: activeDomain.owner,
+            state: activeDomain.state,
+            emoji: activeDomain.emoji,
+            notes: activeDomain.notes ?? [],
+          }}
+          onClose={() => setActiveDomainName(null)}
+          onSave={handleSaveDomain}
+        />
+      ) : null}
 
       {showCalendar ? (
         <CalendarModal

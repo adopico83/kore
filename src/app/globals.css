@@ -13,6 +13,7 @@
   --kore-red: #e05555;
   --kore-text: #e4e6ed;
   --kore-muted: rgba(228, 230, 237, 0.45);
+  --muted: var(--kore-muted);
 }
 
 @theme inline {
