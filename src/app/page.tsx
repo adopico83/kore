@@ -216,6 +216,17 @@ const DOMAINS: DomainCard[] = [
     agent: "logistica",
     notes: ["Firmar autorización"],
   },
+  {
+    id: "tiempo-libre",
+    name: "Tiempo Libre",
+    owner: "Sin asignar",
+    weight: 7,
+    emoji: "🌿",
+    state: "Cada uno tiene su espacio",
+    line: "#4CC9A0",
+    agent: "armonia",
+    notes: [],
+  },
 ];
 
 const CORCHO_MESSAGES = [
@@ -760,18 +771,17 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              {domains.slice(4).map((d) => (
-                <div
-                  key={d.name}
-                  style={{
-                    marginTop: 8,
-                    width: "100%",
-                    maxWidth: "100%",
-                    marginLeft: "auto",
-                    marginRight: "auto",
-                  }}
-                >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                  marginTop: 8,
+                }}
+              >
+                {domains.slice(4).map((d) => (
                   <button
+                    key={d.name}
                     type="button"
                     onClick={() => setActiveDomainName(d.name)}
                     style={{
@@ -883,8 +893,8 @@ export default function Home() {
                       </p>
                     </div>
                   </button>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ) : null}
         </section>
