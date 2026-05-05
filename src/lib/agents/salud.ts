@@ -31,6 +31,93 @@ function asMember(p: string): SaludMember | null {
   return null;
 }
 
+function normalizeTime(raw: string): string {
+  const s = (raw ?? "").trim();
+  const hourOnly = s.match(/^(\d{1,2})$/);
+  if (hourOnly) return `${String(Math.min(23, Math.max(0, Number(hourOnly[1])))).padStart(2, "0")}:00`;
+  if (/^\d{1,2}:\d{2}$/.test(s)) return s.length === 5 ? s : `0${s}`;
+  if (/^\d{1,2}:\d{2}:\d{2}$/.test(s)) return s.slice(0, 5);
+  return "09:00";
+}
+
+function normalizeDate(rawDate: string): string | null {
+  const input = (rawDate ?? "").trim().toLowerCase();
+  if (!input) return null;
+  const now = new Date();
+  const toIso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  if (input === "mañana" || input === "manana") {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    const normalized = toIso(tomorrow);
+    console.log("[salud] normalizeDate", { rawDate, normalized, mode: "relative_tomorrow" });
+    return normalized;
+  }
+
+  if (input === "esta semana") {
+    const monday = new Date(now);
+    const day = monday.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    monday.setDate(monday.getDate() + mondayOffset);
+    const normalized = toIso(monday);
+    console.log("[salud] normalizeDate", { rawDate, normalized, mode: "relative_week_monday" });
+    return normalized;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    console.log("[salud] normalizeDate", { rawDate, normalized: input, mode: "iso" });
+    return input;
+  }
+
+  const slashOrDash = input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (slashOrDash) {
+    const day = Number(slashOrDash[1]);
+    const month = Number(slashOrDash[2]);
+    let year = Number(slashOrDash[3]);
+    if (year < 100) year += 2000;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const normalized = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      console.log("[salud] normalizeDate", { rawDate, normalized, mode: "slash_or_dash" });
+      return normalized;
+    }
+  }
+
+  const months: Record<string, number> = {
+    enero: 1,
+    febrero: 2,
+    marzo: 3,
+    abril: 4,
+    mayo: 5,
+    junio: 6,
+    julio: 7,
+    agosto: 8,
+    septiembre: 9,
+    setiembre: 9,
+    octubre: 10,
+    noviembre: 11,
+    diciembre: 12,
+  };
+  const textDate = input.match(/^(\d{1,2})(?:\s+de)?\s+([a-záéíóú]+)(?:\s+de)?\s*(\d{4})?$/i);
+  if (textDate) {
+    const day = Number(textDate[1]);
+    const monthName = textDate[2]
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const month = months[monthName];
+    const year = textDate[3] ? Number(textDate[3]) : 2026;
+    if (month && day >= 1 && day <= 31) {
+      const normalized = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      console.log("[salud] normalizeDate", { rawDate, normalized, mode: "text_month" });
+      return normalized;
+    }
+  }
+
+  console.log("[salud] normalizeDate", { rawDate, normalized: null, mode: "failed" });
+  return null;
+}
+
 export const tools: ChatCompletionTool[] = [
   {
     type: "function",
@@ -133,10 +220,21 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     case "add_appointment": {
       const patient = asMember(String(a.patient ?? ""));
       const descripcion = String(a.description ?? "").trim();
-      const fecha = String(a.date ?? "").slice(0, 10);
-      const hora = String(a.time ?? "").trim();
+      const rawDate = String(a.date ?? "").trim();
+      const fecha = normalizeDate(rawDate);
+      const rawTime = String(a.time ?? "").trim();
+      const hora = normalizeTime(rawTime);
       const lugar = String(a.location ?? "").trim();
       if (!patient || !descripcion || !fecha || !hora) return { error: "Faltan campos." };
+      console.log("[salud] add_appointment input", {
+        rawArgs: a,
+        patient,
+        descripcion,
+        rawDate,
+        normalizedDate: fecha,
+        rawTime,
+        normalizedTime: hora,
+      });
       const insert = buildCitaHealthInsert(patient, {
         descripcion,
         fecha,
@@ -144,6 +242,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
         lugar,
       });
       const row = await addHealthRecord(insert);
+      console.log("[salud] add_appointment output", row);
       return { ok: true, record: row };
     }
     case "add_medication": {

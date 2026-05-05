@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-import { createClient } from "@/lib/supabase/client";
+import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import type { Database } from "@/types/database";
 
 /** IDs fijos hasta auth real (mismo contrato que `kore-seed.ts`). */
@@ -134,11 +135,21 @@ type KoreClient = SupabaseClient<KoreDatabase>;
 
 /** Cliente browser tipado con tablas Kore (incluye las aún no reflejadas en `database.ts`). */
 export function getKoreSupabaseClient(): KoreClient {
-  return createClient() as unknown as KoreClient;
+  return createBrowserClient() as unknown as KoreClient;
+}
+
+/** Cliente server sin dependencia de cookies/sesión del navegador. */
+export function getKoreSupabaseServerClient(): KoreClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error("Faltan variables NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
+  return createSupabaseClient<KoreDatabase>(url, anonKey);
 }
 
 function getClient(): KoreClient {
-  return getKoreSupabaseClient();
+  return typeof window === "undefined" ? getKoreSupabaseServerClient() : getKoreSupabaseClient();
 }
 
 function throwDb(context: string, error: { message: string } | null) {
@@ -235,7 +246,13 @@ export async function addCalendarEvent(event: CalendarEventInsert): Promise<Cale
     ...(event.id ? { id: event.id } : {}),
     ...(event.created_at ? { created_at: event.created_at } : {}),
   };
+  console.log("[kore-db] addCalendarEvent insert row", row);
   const { data, error } = await supabase.from("calendar_events").insert(row).select("*").single();
+  if (error) {
+    console.error("[kore-db] addCalendarEvent error", error);
+  } else {
+    console.log("[kore-db] addCalendarEvent inserted row", data);
+  }
   throwDb("addCalendarEvent", error);
   return data as CalendarEventRow;
 }

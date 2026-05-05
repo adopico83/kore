@@ -415,6 +415,13 @@ export default function Home() {
     }
   }, []);
 
+  const handleCloseAgentChat = useCallback(() => {
+    setShowAgent(false);
+    queueMicrotask(() => {
+      void loadAgenda();
+    });
+  }, [loadAgenda]);
+
   useEffect(() => {
     queueMicrotask(() => {
       void Promise.all([loadProfiles(), loadDomains(), loadAgenda(), loadExpenses(), loadSalud()]);
@@ -1713,7 +1720,7 @@ export default function Home() {
 
       {showCorcho ? <CorchoChat onClose={() => setShowCorcho(false)} /> : null}
       {showCorchoHistorial ? <CorchoHistorial onClose={() => setShowCorchoHistorial(false)} /> : null}
-      {showAgent ? <AgentChat onClose={() => setShowAgent(false)} /> : null}
+      {showAgent ? <AgentChat onClose={handleCloseAgentChat} /> : null}
       {showEconomia ? (
         <EconomiaModal
           onClose={() => setShowEconomia(false)}

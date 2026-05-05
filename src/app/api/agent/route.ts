@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
-import { getAgentMemory } from "@/lib/kore-db";
+import { getAgentMemory, getKoreSupabaseServerClient } from "@/lib/kore-db";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -36,6 +36,9 @@ const MAX_TOOL_ROUNDS = 14;
 
 export async function POST(request: NextRequest) {
   try {
+    // Fuerza la inicialización del cliente server para este request y valida entorno.
+    getKoreSupabaseServerClient();
+
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "Falta OPENAI_API_KEY en el entorno del servidor" },

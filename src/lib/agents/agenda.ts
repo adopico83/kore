@@ -87,9 +87,90 @@ export const tools: ChatCompletionTool[] = [
 
 function normalizeTime(t: string): string {
   const s = (t ?? "").trim();
+  const hourOnly = s.match(/^(\d{1,2})$/);
+  if (hourOnly) return `${String(Math.min(23, Math.max(0, Number(hourOnly[1])))).padStart(2, "0")}:00`;
   if (/^\d{1,2}:\d{2}$/.test(s)) return s.length === 5 ? s : `0${s}`;
   if (/^\d{1,2}:\d{2}:\d{2}$/.test(s)) return s.slice(0, 5);
   return "09:00";
+}
+
+function normalizeDate(rawDate: string): string | null {
+  const input = (rawDate ?? "").trim().toLowerCase();
+  if (!input) return null;
+  const now = new Date();
+  const toIso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  if (input === "mañana" || input === "manana") {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    const normalized = toIso(tomorrow);
+    console.log("[agenda] normalizeDate", { rawDate, normalized, mode: "relative_tomorrow" });
+    return normalized;
+  }
+
+  if (input === "esta semana") {
+    const monday = new Date(now);
+    const day = monday.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    monday.setDate(monday.getDate() + mondayOffset);
+    const normalized = toIso(monday);
+    console.log("[agenda] normalizeDate", { rawDate, normalized, mode: "relative_week_monday" });
+    return normalized;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    console.log("[agenda] normalizeDate", { rawDate, normalized: input, mode: "iso" });
+    return input;
+  }
+
+  const slashOrDash = input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (slashOrDash) {
+    const day = Number(slashOrDash[1]);
+    const month = Number(slashOrDash[2]);
+    let year = Number(slashOrDash[3]);
+    if (year < 100) year += 2000;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const normalized = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      console.log("[agenda] normalizeDate", { rawDate, normalized, mode: "slash_or_dash" });
+      return normalized;
+    }
+  }
+
+  const months: Record<string, number> = {
+    enero: 1,
+    febrero: 2,
+    marzo: 3,
+    abril: 4,
+    mayo: 5,
+    junio: 6,
+    julio: 7,
+    agosto: 8,
+    septiembre: 9,
+    setiembre: 9,
+    octubre: 10,
+    noviembre: 11,
+    diciembre: 12,
+  };
+
+  const textDate = input.match(/^(\d{1,2})(?:\s+de)?\s+([a-záéíóú]+)(?:\s+de)?\s*(\d{4})?$/i);
+  if (textDate) {
+    const day = Number(textDate[1]);
+    const monthName = textDate[2]
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    const month = months[monthName];
+    const year = textDate[3] ? Number(textDate[3]) : 2026;
+    if (month && day >= 1 && day <= 31) {
+      const normalized = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      console.log("[agenda] normalizeDate", { rawDate, normalized, mode: "text_month" });
+      return normalized;
+    }
+  }
+
+  console.log("[agenda] normalizeDate", { rawDate, normalized: null, mode: "failed" });
+  return null;
 }
 
 export async function execute(toolName: string, args: unknown): Promise<unknown> {
@@ -101,7 +182,8 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
   switch (toolName) {
     case "add_calendar_event": {
       const title = String(a.title ?? "").trim();
-      const date = String(a.date ?? "").trim();
+      const rawDate = String(a.date ?? "").trim();
+      const date = normalizeDate(rawDate);
       const time = normalizeTime(String(a.time ?? ""));
       const extra = String(a.description ?? "").trim();
       if (!title || !date) return { error: "Faltan title o date." };
@@ -112,7 +194,20 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
         time,
         created_by: ANDER_ID,
       };
+      console.log("[agenda] add_calendar_event input", {
+        rawArgs: a,
+        title,
+        rawDate,
+        normalizedDate: date,
+        time,
+        createdBy: row.created_by,
+      });
+      if (!row.created_by) {
+        console.warn("[agenda] add_calendar_event created_by vacío, se forzará ANDER_ID");
+        row.created_by = ANDER_ID;
+      }
       const created = await addCalendarEvent(row);
+      console.log("[agenda] add_calendar_event output", created);
       return { ok: true, event: created };
     }
     case "get_calendar_events": {
