@@ -2,6 +2,7 @@
 
 import { Play, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 type CorchoStoredMessage = {
   id?: string;
@@ -69,6 +70,7 @@ export type CorchoHistorialProps = {
 };
 
 export function CorchoHistorial({ onClose }: CorchoHistorialProps) {
+  useEscapeKey(onClose);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const feed = useMemo(() => readFeedFromStorage(), []);
 

@@ -12,6 +12,7 @@ import {
   type TouchEvent,
 } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 const GREEN = "#4CC9A0";
 const PURPLE = "#9B8FE8";
@@ -183,6 +184,7 @@ export type CorchoChatProps = {
 };
 
 export function CorchoChat({ onClose }: CorchoChatProps) {
+  useEscapeKey(onClose);
   const [mensaje, setMensaje] = useState("");
   const [conversationId, setConversationId] = useState("");
   const [conversaciones, setConversaciones] = useState<CorchoConv[]>([]);

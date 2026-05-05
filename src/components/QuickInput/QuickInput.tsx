@@ -3,7 +3,7 @@
 import { Loader2, Mic } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
-import { createClient } from "@/lib/supabase/client";
+import { getBrowserClient } from "@/lib/supabase/client";
 
 type QuickInputState =
   | "idle"
@@ -213,7 +213,7 @@ export function QuickInput() {
     setState("saving");
     setErrorMessage(null);
 
-    const supabase = createClient();
+    const supabase = getBrowserClient();
     const type = inferEventType(trimmed);
 
     const { error } = await supabase.from("events_log").insert({

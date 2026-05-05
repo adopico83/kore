@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Pencil, Trash2, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 export type KoreAgendaEvent = {
   id: string;
@@ -79,6 +80,7 @@ export function CalendarModal({
   onUpdateEvent,
   onDeleteEvent,
 }: CalendarModalProps) {
+  useEscapeKey(onClose);
   const useRemote = Boolean(onAddEvent && onUpdateEvent && onDeleteEvent);
   const [mesCalendario, setMesCalendario] = useState<Date>(() => new Date());
   const [diaDetalleFecha, setDiaDetalleFecha] = useState<string | null>(null);

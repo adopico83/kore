@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 export type PerfilUsuario = "Ander" | "Leire";
 
@@ -125,6 +126,7 @@ export function PerfilModal({
   onStressChange,
   onNavigate,
 }: PerfilModalProps) {
+  useEscapeKey(onClose);
   const [domainRows, setDomainRows] = useState<PerfilDomainRow[]>(domains);
   const [citasRows, setCitasRows] = useState<PerfilCitaRow[]>(saludMember.citas ?? []);
   const [hoverNavKey, setHoverNavKey] = useState<string | null>(null);

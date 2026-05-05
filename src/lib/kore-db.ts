@@ -1,6 +1,7 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/types/database";
+import { getBrowserClient } from "@/lib/supabase/client";
 
 export const ANDER_ID = "00000000-0000-0000-0000-000000000001";
 export const LEIRE_ID = "00000000-0000-0000-0000-000000000002";
@@ -197,25 +198,8 @@ export type KoreDatabase = {
 
 type KoreClient = SupabaseClient<KoreDatabase>;
 
-let singleton: KoreClient | null = null;
-
-function getEnvOrThrow(name: "NEXT_PUBLIC_SUPABASE_URL" | "NEXT_PUBLIC_SUPABASE_ANON_KEY"): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Falta ${name} en el entorno`);
-  return value;
-}
-
-export function getKoreSupabaseClient(): KoreClient {
-  if (singleton) return singleton;
-  singleton = createClient<KoreDatabase>(
-    getEnvOrThrow("NEXT_PUBLIC_SUPABASE_URL"),
-    getEnvOrThrow("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-  );
-  return singleton;
-}
-
 function db(): KoreClient {
-  return getKoreSupabaseClient();
+  return getBrowserClient();
 }
 
 function throwDb(context: string, error: { message: string } | null) {

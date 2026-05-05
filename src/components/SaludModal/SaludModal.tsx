@@ -16,6 +16,7 @@ import {
   saludFromHealthRecords,
 } from "@/lib/kore-salud-sync";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 export const LS_KORE_SALUD = "kore_salud";
 
@@ -74,6 +75,7 @@ export type SaludModalProps = {
 };
 
 export function SaludModal({ onClose, onChange }: SaludModalProps) {
+  useEscapeKey(onClose);
   const [data, setData] = useState<SaludData>(() => readSalud());
   const [openMember, setOpenMember] = useState<Member>("Peque");
   const [editingKey, setEditingKey] = useState<string | null>(null);

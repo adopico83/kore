@@ -6,6 +6,7 @@ import { CorchoHistorial } from "@/components/CorchoHistorial";
 import { DomainModal, type DomainItem } from "@/components/DomainModal";
 import { EconomiaModal, type ExpenseItem } from "@/components/EconomiaModal";
 import { PerfilModal, type PerfilNavigateTipo, type PerfilUsuario } from "@/components/PerfilModal";
+import { ShoppingModal } from "@/components/ShoppingModal/ShoppingModal";
 import { SaludResumenModal } from "@/components/SaludResumenModal";
 import { SaludModal, type SaludData } from "@/components/SaludModal";
 import {
@@ -264,10 +265,15 @@ function mergedDomainCard(row: KoreDomainRow): DomainCard {
   };
 }
 
+function isComprasDomain(name: string): boolean {
+  return name.trim().toLowerCase() === "compras";
+}
+
 function mergeDomainsWithFallback(primary: DomainCard[], fallback: DomainCard[]): DomainCard[] {
-  const byName = new Map(primary.map((d) => [d.name, d]));
+  const normalizeDomainKey = (name: string) => name.trim().toLowerCase();
+  const byName = new Map(primary.map((d) => [normalizeDomainKey(d.name), d]));
   const merged = fallback.map((base) => {
-    const fromDb = byName.get(base.name);
+    const fromDb = byName.get(normalizeDomainKey(base.name));
     if (!fromDb) return base;
     return {
       ...base,
@@ -278,8 +284,7 @@ function mergeDomainsWithFallback(primary: DomainCard[], fallback: DomainCard[])
       notes: fromDb.notes && fromDb.notes.length > 0 ? fromDb.notes : base.notes,
     };
   });
-  const extras = primary.filter((d) => !fallback.some((b) => b.name === d.name));
-  return [...merged, ...extras];
+  return merged;
 }
 
 function enrichComprasDomainFromShoppingItems(domain: DomainCard, items: Awaited<ReturnType<typeof getShoppingItems>>): DomainCard {
@@ -341,14 +346,9 @@ function withinAgendaWindow(dateIso: string, now = new Date()): boolean {
   const from = new Date(now);
   from.setHours(0, 0, 0, 0);
   const to = new Date(from);
-  to.setDate(to.getDate() + 7);
+  to.setDate(to.getDate() + 30);
   const d = new Date(`${dateIso}T00:00:00`);
   return d >= from && d <= to;
-}
-
-function withinLast24h(iso: string, now = Date.now()): boolean {
-  const ts = Date.parse(iso);
-  return Number.isFinite(ts) && ts >= now - 24 * 60 * 60 * 1000 && ts <= now;
 }
 
 export function HomeClient() {
@@ -356,6 +356,7 @@ export function HomeClient() {
   const [showCorcho, setShowCorcho] = useState(false);
   const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
   const [showEconomia, setShowEconomia] = useState(false);
+  const [showShopping, setShowShopping] = useState(false);
   const [showSalud, setShowSalud] = useState(false);
   const [showSaludResumen, setShowSaludResumen] = useState(false);
   const [showPerfil, setShowPerfil] = useState(false);
@@ -367,7 +368,7 @@ export function HomeClient() {
 
   const [domainsOpen, setDomainsOpen] = useState(true);
   const [domainCardHover, setDomainCardHover] = useState<Record<string, boolean>>({});
-  const [domains, setDomains] = useState<DomainCard[]>([]);
+  const [domains, setDomains] = useState<DomainCard[]>(DOMAINS);
   const [corchoMessages, setCorchoMessages] = useState<CorchoMessage[]>([]);
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
@@ -443,7 +444,13 @@ export function HomeClient() {
   const loadSalud = useCallback(async () => {
     try {
       const rows = await getHealthRecords();
-      const filtered = rows.filter((r) => withinLast24h(r.created_at));
+      const filtered = rows.filter((r) => {
+        const active = r.status === "active" || r.status === "pending";
+        if (!active) return false;
+        if (r.type === "appointment") return Boolean((r.date_time ?? "").trim());
+        if (r.type === "medication") return Boolean((r.next_dose_at ?? "").trim());
+        return false;
+      });
       setSalud(saludFromHealthRecords(filtered) as SaludData);
     } catch {
       setSalud({
@@ -587,22 +594,6 @@ export function HomeClient() {
     [salud],
   );
 
-  const skeletonDomains = useMemo<DomainCard[]>(
-    () =>
-      Array.from({ length: 6 }).map((_, i) => ({
-        id: `sk_${i}`,
-        name: "",
-        owner: "",
-        weight: 8,
-        emoji: "",
-        state: "",
-        line: SKEL.line,
-        notes: [],
-      })),
-    [],
-  );
-  const domainsForUI = booting ? skeletonDomains : domains;
-
   const sortAgendaEvents = useCallback((list: KoreAgendaEvent[]) => {
     return [...list].sort((a, b) => {
       const da = (a.fecha ?? "").localeCompare(b.fecha ?? "");
@@ -708,6 +699,10 @@ export function HomeClient() {
     if (tipo === "domain") {
       const selectedDomain = domains.find((d) => d.id === id);
       if (selectedDomain) {
+        if (isComprasDomain(selectedDomain.name)) {
+          setShowShopping(true);
+          return;
+        }
         setActiveDomainName(selectedDomain.name);
       }
     }
@@ -1112,13 +1107,19 @@ export function HomeClient() {
                   gap: 8,
                 }}
               >
-                {domainsForUI.slice(0, 4).map((d) => {
+                {domains.slice(0, 4).map((d) => {
                   const domHover = domainCardHover[d.name] ?? false;
                   return (
                   <button
-                    key={d.name}
+                    key={d.id || d.name}
                     type="button"
-                    onClick={() => setActiveDomainName(d.name)}
+                    onClick={() => {
+                      if (isComprasDomain(d.name)) {
+                        setShowShopping(true);
+                        return;
+                      }
+                      setActiveDomainName(d.name);
+                    }}
                     onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
                     onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                     onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
@@ -1258,13 +1259,19 @@ export function HomeClient() {
                   marginTop: 8,
                 }}
               >
-                {domainsForUI.slice(4).map((d) => {
+                {domains.slice(4).map((d) => {
                   const domHover = domainCardHover[d.name] ?? false;
                   return (
                   <button
-                    key={d.name}
+                    key={d.id || d.name}
                     type="button"
-                    onClick={() => setActiveDomainName(d.name)}
+                    onClick={() => {
+                      if (isComprasDomain(d.name)) {
+                        setShowShopping(true);
+                        return;
+                      }
+                      setActiveDomainName(d.name);
+                    }}
                     onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
                     onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                     onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
@@ -1891,6 +1898,7 @@ export function HomeClient() {
           onChange={(items) => setExpenses(items)}
         />
       ) : null}
+      {showShopping ? <ShoppingModal onClose={() => setShowShopping(false)} /> : null}
       {showSalud ? (
         <SaludModal
           onClose={() => setShowSalud(false)}

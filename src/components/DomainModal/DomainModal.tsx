@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 export type DomainItem = {
   id: string;
@@ -33,6 +34,7 @@ const cardStyle: CSSProperties = {
 };
 
 export function DomainModal({ domain, onClose, onSave, historyEntries, historyReadOnly }: DomainModalProps) {
+  useEscapeKey(onClose);
   const [owner, setOwner] = useState(domain.owner);
   const [stateText, setStateText] = useState(domain.state);
   const [notes, setNotes] = useState<string[]>(domain.notes ?? []);

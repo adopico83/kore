@@ -1,6 +1,7 @@
 import type { Database } from "@/types/database";
 
-import { ANDER_ID, LEIRE_ID, getKoreSupabaseClient } from "@/lib/kore-db";
+import { ANDER_ID, LEIRE_ID } from "@/lib/kore-db";
+import { getBrowserClient } from "@/lib/supabase/client";
 
 type DomainAgent = Database["public"]["Tables"]["domains"]["Row"]["agent"];
 
@@ -69,7 +70,7 @@ const DOMAIN_SEED: Array<{
  * Dominios: los 6 del shell actual con peso y agente.
  */
 export async function seedInitialData(): Promise<{ profilesSeeded: boolean; domainsSeeded: boolean }> {
-  const supabase = getKoreSupabaseClient();
+  const supabase = getBrowserClient();
   let profilesSeeded = false;
   let domainsSeeded = false;
 

@@ -16,6 +16,7 @@ import {
   saludFromHealthRecords,
 } from "@/lib/kore-salud-sync";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 type Member = "Peque" | "Ander" | "Leire";
 
@@ -70,6 +71,7 @@ export type SaludResumenModalProps = {
 };
 
 export function SaludResumenModal({ onClose, onChange }: SaludResumenModalProps) {
+  useEscapeKey(onClose);
   const [data, setData] = useState<SaludData>(() => readSalud());
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [citaDraft, setCitaDraft] = useState<Cita>({

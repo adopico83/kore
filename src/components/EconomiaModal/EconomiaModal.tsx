@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { addExpense, ANDER_ID, deleteExpense, getExpenses, LEIRE_ID, type Expense } from "@/lib/kore-db";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 export const LS_KORE_EXPENSES = "kore_expenses";
 
@@ -73,6 +74,7 @@ export type EconomiaModalProps = {
 };
 
 export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
+  useEscapeKey(onClose);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 

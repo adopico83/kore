@@ -14,6 +14,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import { emitKoreUpdate, type KoreTable } from "@/lib/kore-events";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 const LS_INDEX = "kore_orc_conv_index";
 const lsMsgsKey = (id: string) => `kore_orc_msgs_${id}`;
@@ -500,6 +501,7 @@ export type AgentChatProps = {
 };
 
 export function AgentChat({ onClose }: AgentChatProps) {
+  useEscapeKey(onClose);
   const [fechaRelativaAnchorMs, setFechaRelativaAnchorMs] = useState<number | null>(null);
   const [mensaje, setMensaje] = useState("");
   const [historial, setHistorial] = useState<ChatMessage[]>([]);
