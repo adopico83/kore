@@ -179,14 +179,40 @@ type DomainCard = {
   notes?: string[];
 };
 
-const DOMAIN_META: Record<string, Pick<DomainCard, "emoji" | "line" | "agent">> = {
-  Menú: { emoji: "🍽️", line: "#4CC9A0" },
-  Sueño: { emoji: "😴", line: "#9B8FE8" },
-  Limpieza: { emoji: "🧹", line: "#EF9F27" },
-  Compras: { emoji: "🛒", line: "#4CC9A0" },
-  Colegio: { emoji: "🎒", line: "#7F77DD", agent: "logistica" },
-  "Tiempo Libre": { emoji: "🌿", line: "#4CC9A0", agent: "armonia" },
-};
+const DOMAINS: DomainCard[] = [
+  { id: "menu", name: "Menú", owner: "Ander", weight: 8, emoji: "🍽️", state: "En curso", line: "#4CC9A0", notes: ["Revisar nevera"] },
+  { id: "sueno", name: "Sueño", owner: "Leire", weight: 15, emoji: "😴", state: "Prioritario", line: "#9B8FE8", notes: ["Acostar antes de 23:00"] },
+  { id: "limpieza", name: "Limpieza", owner: "Leire", weight: 5, emoji: "🧹", state: "OK", line: "#EF9F27", notes: ["Baño principal"] },
+  { id: "compras", name: "Compras", owner: "Ander", weight: 4, emoji: "🛒", state: "Pendiente", line: "#4CC9A0", notes: ["Falta fruta"] },
+  {
+    id: "colegio",
+    name: "Colegio",
+    owner: "Leire",
+    weight: 6,
+    emoji: "🎒",
+    state: "Excursión 15 mayo",
+    line: "#7F77DD",
+    agent: "logistica",
+    notes: ["Firmar autorización"],
+  },
+  {
+    id: "tiempo-libre",
+    name: "Tiempo Libre",
+    owner: "Sin asignar",
+    weight: 7,
+    emoji: "🌿",
+    state: "Cada uno tiene su espacio",
+    line: "#4CC9A0",
+    agent: "armonia",
+    notes: [],
+  },
+];
+
+const CORCHO_MESSAGES: CorchoMessage[] = [
+  { who: "Leire", avatar: "L", ownerColor: "#f59e0b", text: "Te dejo un audio sobre la reunión del cole.", when: "Hace 12 min" },
+  { who: "Ander", avatar: "A", ownerColor: "#10b981", text: "¿Puedes recoger pan antes de las 19:00?", when: "Ayer 21:40" },
+  { who: "Leire", avatar: "L", ownerColor: "#f59e0b", text: "Mañana revisamos menú de la semana.", when: "Ayer 20:15" },
+];
 
 type CorchoMessage = {
   who: "Ander" | "Leire";
@@ -222,7 +248,7 @@ function mapExpenseRowToItem(row: Expense): ExpenseItem {
 }
 
 function mergedDomainCard(row: KoreDomainRow): DomainCard {
-  const meta = DOMAIN_META[row.name] ?? { emoji: "📌", line: "#4CC9A0" };
+  const def = DOMAINS.find((d) => d.name === row.name);
   const owner =
     row.owner_id === ANDER_ID ? "Ander" : row.owner_id === LEIRE_ID ? "Leire" : "Sin asignar";
   return {
@@ -230,12 +256,30 @@ function mergedDomainCard(row: KoreDomainRow): DomainCard {
     name: row.name,
     owner,
     weight: row.weight,
-    emoji: meta.emoji,
-    state: "Sin actividad",
-    line: meta.line,
-    agent: row.agent ?? meta.agent,
-    notes: [],
+    emoji: def?.emoji ?? "📌",
+    state: def?.state ?? "Sin actividad",
+    line: def?.line ?? "#4CC9A0",
+    agent: row.agent ?? def?.agent,
+    notes: def?.notes ?? [],
   };
+}
+
+function mergeDomainsWithFallback(primary: DomainCard[], fallback: DomainCard[]): DomainCard[] {
+  const byName = new Map(primary.map((d) => [d.name, d]));
+  const merged = fallback.map((base) => {
+    const fromDb = byName.get(base.name);
+    if (!fromDb) return base;
+    return {
+      ...base,
+      ...fromDb,
+      emoji: fromDb.emoji || base.emoji,
+      line: fromDb.line || base.line,
+      state: fromDb.state || base.state,
+      notes: fromDb.notes && fromDb.notes.length > 0 ? fromDb.notes : base.notes,
+    };
+  });
+  const extras = primary.filter((d) => !fallback.some((b) => b.name === d.name));
+  return [...merged, ...extras];
 }
 
 function enrichComprasDomainFromShoppingItems(domain: DomainCard, items: Awaited<ReturnType<typeof getShoppingItems>>): DomainCard {
@@ -368,9 +412,9 @@ export function HomeClient() {
           sleepLogs,
         ),
       );
-      setDomains(mapped);
+      setDomains(mergeDomainsWithFallback(mapped, DOMAINS));
     } catch {
-      setDomains([]);
+      setDomains(DOMAINS);
     }
   }, []);
 
@@ -423,9 +467,9 @@ export function HomeClient() {
           when: new Date(r.created_at).toLocaleString("es-ES"),
         };
       });
-      setCorchoMessages(mapped);
+      setCorchoMessages(mapped.length > 0 ? mapped : CORCHO_MESSAGES);
     } catch {
-      setCorchoMessages([]);
+      setCorchoMessages(CORCHO_MESSAGES);
     }
   }, []);
 
