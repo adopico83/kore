@@ -15,6 +15,7 @@ import {
   buildMedHealthUpdate,
   saludFromHealthRecords,
 } from "@/lib/kore-salud-sync";
+import { emitKoreUpdate } from "@/lib/kore-events";
 
 export const LS_KORE_SALUD = "kore_salud";
 
@@ -150,6 +151,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
         setHora("");
         setLugar("");
         await reloadFromRemote();
+        emitKoreUpdate(["health_records"]);
       } catch {
         const next = structuredClone(data);
         next[miembro].citas.push({
@@ -183,6 +185,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
       setFrecuenciaHoras("");
       setProximaToma("");
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[miembro].medicaciones.push({
@@ -204,6 +207,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
     try {
       await deleteHealthRecord(id);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].citas = next[member].citas.filter((c) => c.id !== id);
@@ -215,6 +219,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
     try {
       await deleteHealthRecord(id);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].medicaciones = next[member].medicaciones.filter((m) => m.id !== id);
@@ -247,6 +252,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
       );
       setEditingKey(null);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].citas = next[member].citas.map((c) =>
@@ -281,6 +287,7 @@ export function SaludModal({ onClose, onChange }: SaludModalProps) {
       );
       setEditingKey(null);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].medicaciones = next[member].medicaciones.map((m) =>

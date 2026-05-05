@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
+import { emitKoreUpdate } from "@/lib/kore-events";
 
 export type DomainItem = {
   id: string;
@@ -319,7 +320,11 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
       <footer style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: 12 }}>
         <button
           type="button"
-          onClick={() => void Promise.resolve(onSave({ owner, state: stateText.trim(), notes }))}
+          onClick={() =>
+            void Promise.resolve(onSave({ owner, state: stateText.trim(), notes })).then(() =>
+              emitKoreUpdate(["domains"]),
+            )
+          }
           style={{
             width: "100%",
             borderRadius: 10,

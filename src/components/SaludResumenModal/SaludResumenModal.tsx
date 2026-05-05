@@ -15,6 +15,7 @@ import {
   buildMedHealthUpdate,
   saludFromHealthRecords,
 } from "@/lib/kore-salud-sync";
+import { emitKoreUpdate } from "@/lib/kore-events";
 
 type Member = "Peque" | "Ander" | "Leire";
 
@@ -113,6 +114,7 @@ export function SaludResumenModal({ onClose, onChange }: SaludResumenModalProps)
     try {
       await deleteHealthRecord(id);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].citas = next[member].citas.filter((c) => c.id !== id);
@@ -124,6 +126,7 @@ export function SaludResumenModal({ onClose, onChange }: SaludResumenModalProps)
     try {
       await deleteHealthRecord(id);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].medicaciones = next[member].medicaciones.filter((m) => m.id !== id);
@@ -156,6 +159,7 @@ export function SaludResumenModal({ onClose, onChange }: SaludResumenModalProps)
       );
       setEditingKey(null);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].citas = next[member].citas.map((c) =>
@@ -190,6 +194,7 @@ export function SaludResumenModal({ onClose, onChange }: SaludResumenModalProps)
       );
       setEditingKey(null);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[member].medicaciones = next[member].medicaciones.map((m) =>
@@ -224,6 +229,7 @@ export function SaludResumenModal({ onClose, onChange }: SaludResumenModalProps)
         setNewCita({ descripcion: "", fecha: "", hora: "", lugar: "" });
         setAddingMember(null);
         await reloadFromRemote();
+        emitKoreUpdate(["health_records"]);
       } catch {
         const next = structuredClone(data);
         next[addingMember].citas.push({
@@ -253,6 +259,7 @@ export function SaludResumenModal({ onClose, onChange }: SaludResumenModalProps)
       setNewMed({ nombre: "", dosis: "", frecuenciaHoras: "", proximaToma: "" });
       setAddingMember(null);
       await reloadFromRemote();
+      emitKoreUpdate(["health_records"]);
     } catch {
       const next = structuredClone(data);
       next[addingMember].medicaciones.push({

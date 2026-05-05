@@ -1,45 +1,16 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
-import { getAgentMemory, upsertAgentMemory } from "@/lib/kore-db";
+import {
+  ANDER_ID,
+  addCleaningTask,
+  completeCleaningTask,
+  getCleaningTasks,
+  getPendingCleaningTasks,
+  LEIRE_ID,
+} from "@/lib/kore-db";
 
 export const AGENT_DESCRIPTION =
   "Experto en gestión de la limpieza del hogar. Gestiona ÚNICAMENTE tareas de limpieza, frecuencias, zonas del hogar y responsables.";
-
-const MEMORY_KEY = "kore_subagent_limpieza_v1";
-const MEMORY_CAT = "limpieza";
-
-type CleaningTask = {
-  id: string;
-  zone: string;
-  task: string;
-  frequency: "diaria" | "semanal" | "mensual";
-  assigned_to: "Ander" | "Leire";
-  completed_at: string | null;
-};
-
-type LimpiezaState = { tasks: CleaningTask[] };
-
-async function loadState(): Promise<LimpiezaState> {
-  const rows = await getAgentMemory();
-  const row = rows.find((r) => r.key === MEMORY_KEY);
-  if (!row?.value) return { tasks: [] };
-  try {
-    const p = JSON.parse(row.value) as LimpiezaState;
-    return { tasks: Array.isArray(p.tasks) ? p.tasks : [] };
-  } catch {
-    return { tasks: [] };
-  }
-}
-
-async function saveState(state: LimpiezaState): Promise<void> {
-  await upsertAgentMemory(MEMORY_KEY, JSON.stringify(state), MEMORY_CAT);
-}
-
-function newId() {
-  return typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `clean_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
 
 const NAMES = new Set([
   "add_cleaning_task",
@@ -106,39 +77,25 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     case "add_cleaning_task": {
       const zone = String(a.zone ?? "").trim();
       const task = String(a.task ?? "").trim();
-      const frequency = a.frequency as CleaningTask["frequency"];
-      const assigned_to = a.assigned_to as CleaningTask["assigned_to"];
-      if (!zone || !task || !frequency || !assigned_to) return { error: "Faltan campos." };
-      const t: CleaningTask = {
-        id: newId(),
-        zone,
-        task,
-        frequency,
-        assigned_to,
-        completed_at: null,
-      };
-      const st = await loadState();
-      st.tasks.push(t);
-      await saveState(st);
-      return { ok: true, task: t };
+      const frequency = String(a.frequency ?? "semanal");
+      const assignedRaw = String(a.assigned_to ?? "");
+      const assigned_to = assignedRaw === "Ander" ? ANDER_ID : assignedRaw === "Leire" ? LEIRE_ID : undefined;
+      if (!zone || !task) throw new Error("Faltan zone o task para limpieza.");
+      const created = await addCleaningTask({ zone, task, frequency, assigned_to });
+      return { ok: true, task: created };
     }
     case "get_cleaning_tasks": {
-      const st = await loadState();
-      return { ok: true, tasks: st.tasks };
+      const tasks = await getCleaningTasks();
+      return { ok: true, tasks };
     }
     case "complete_cleaning_task": {
       const id = String(a.id ?? "").trim();
-      if (!id) return { error: "Falta id." };
-      const st = await loadState();
-      const t = st.tasks.find((x) => x.id === id);
-      if (!t) return { error: "Tarea no encontrada." };
-      t.completed_at = new Date().toISOString();
-      await saveState(st);
-      return { ok: true, task: t };
+      if (!id) throw new Error("Falta id para completar tarea de limpieza.");
+      await completeCleaningTask(id);
+      return { ok: true, completed: id };
     }
     case "get_pending_cleaning": {
-      const st = await loadState();
-      const pending = st.tasks.filter((t) => !t.completed_at);
+      const pending = await getPendingCleaningTasks();
       return { ok: true, pending };
     }
     default:

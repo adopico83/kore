@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { addExpense, ANDER_ID, deleteExpense, getExpenses, LEIRE_ID, type Expense } from "@/lib/kore-db";
+import { emitKoreUpdate } from "@/lib/kore-events";
 
 export const LS_KORE_EXPENSES = "kore_expenses";
 
@@ -156,6 +157,7 @@ export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
       const next = [item, ...items].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
       setItems(next);
       onChange?.(next);
+      emitKoreUpdate(["expenses"]);
     } catch {
       const item: ExpenseItem = {
         id: crypto.randomUUID?.() ?? `exp_${Date.now()}`,
@@ -182,6 +184,7 @@ export function EconomiaModal({ onClose, onChange }: EconomiaModalProps) {
       const next = items.filter((it) => it.id !== id);
       setItems(next);
       onChange?.(next);
+      emitKoreUpdate(["expenses"]);
     } catch {
       updateItemsLocal(items.filter((it) => it.id !== id));
     }

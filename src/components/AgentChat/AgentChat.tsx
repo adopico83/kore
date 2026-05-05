@@ -13,10 +13,84 @@ import {
   type TouchEvent,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import { emitKoreUpdate, type KoreTable } from "@/lib/kore-events";
 
 const LS_INDEX = "kore_orc_conv_index";
 const lsMsgsKey = (id: string) => `kore_orc_msgs_${id}`;
 const LS_ACTIVE = "kore_orc_active_conv";
+
+const toolToTable: Record<string, KoreTable[]> = {
+  // Agenda
+  add_calendar_event: ["calendar_events"],
+  get_calendar_events: [],
+  delete_calendar_event: ["calendar_events"],
+  get_upcoming_events: [],
+
+  // Colegio
+  add_school_event: ["school_events", "calendar_events"],
+  get_school_events: [],
+  add_school_material: ["school_materials"],
+  get_school_materials: [],
+  delete_school_item: ["school_events", "school_materials"],
+
+  // Compras
+  add_shopping_item: ["shopping_items"],
+  get_shopping_list: [],
+  complete_shopping_item: ["shopping_items"],
+  delete_shopping_item: ["shopping_items"],
+  clear_completed_items: ["shopping_items"],
+
+  // Limpieza
+  add_cleaning_task: ["cleaning_tasks"],
+  get_cleaning_tasks: [],
+  complete_cleaning_task: ["cleaning_tasks"],
+  get_pending_cleaning: [],
+
+  // Menú
+  add_menu_item: ["menu_items"],
+  get_weekly_menu: [],
+  clear_day_menu: ["menu_items"],
+  suggest_menu: [],
+
+  // Sueño
+  log_wakeup: ["sleep_logs"],
+  log_sleep_hours: ["sleep_logs"],
+  get_sleep_summary: [],
+  get_night_recovery_score: [],
+
+  // Tiempo libre
+  add_leisure_activity: ["leisure_activities"],
+  get_leisure_activities: [],
+  log_personal_time: ["leisure_activities"],
+  get_balance_summary: [],
+
+  // Salud
+  add_appointment: ["health_records", "calendar_events"],
+  add_medication: ["health_records"],
+  log_medication_given: ["health_records"],
+  get_health_records: [],
+  complete_appointment: ["health_records"],
+  delete_health_record: ["health_records"],
+
+  // Corcho
+  send_note: ["kore_notes"],
+  get_unread_notes: [],
+  mark_note_read: ["kore_notes"],
+  get_notes_history: [],
+
+  // Economía
+  add_expense: ["expenses"],
+  get_monthly_summary: [],
+  get_expenses_list: [],
+  get_balance: [],
+  delete_expense: ["expenses"],
+
+  // Memoria
+  save_pattern: ["agent_memory"],
+  get_patterns: [],
+  save_insight: ["agent_memory"],
+  get_relevant_memories: [],
+};
 
 type MessageRole = "user" | "assistant";
 
@@ -27,7 +101,7 @@ type ConvMeta = {
   total_mensajes: number;
 };
 
-type ToolExecuted = { name: string; result: unknown };
+type ToolExecuted = { name: string; success: boolean; result: unknown; error?: string };
 
 interface ChatMessage {
   id: string;
@@ -600,6 +674,14 @@ export function AgentChat({ onClose }: AgentChatProps) {
             ? data.respuesta
             : "";
       const toolsExecuted = Array.isArray(data.toolsExecuted) ? data.toolsExecuted : undefined;
+      if (toolsExecuted?.length) {
+        const touched = new Set<KoreTable>();
+        for (const tool of toolsExecuted) {
+          if (!tool.success) continue;
+          for (const table of toolToTable[tool.name] ?? []) touched.add(table);
+        }
+        if (touched.size > 0) emitKoreUpdate(Array.from(touched));
+      }
       const asstAt = new Date().toISOString();
       setHistorial((prev) => [
         ...prev,
@@ -1109,7 +1191,7 @@ export function AgentChat({ onClose }: AgentChatProps) {
                               fontStyle: "italic",
                             }}
                           >
-                            ✓ {t.name}
+                            {t.success ? "✓" : "✕"} {t.name}
                           </p>
                         ))}
                       </div>

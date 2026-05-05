@@ -39,6 +39,7 @@ import {
 } from "@/lib/kore-db";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { saludFromHealthRecords } from "@/lib/kore-salud-sync";
+import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
 
 const LS_KORE_AGENDA = "kore_calendar_events";
 const LS_KORE_DOMAINS = "kore_domains_state";
@@ -442,6 +443,16 @@ export default function Home() {
       [loadAgenda, loadDomains, loadExpenses, loadProfiles, loadSalud],
     ),
   );
+
+  useEffect(() => {
+    return onKoreUpdate((tables) => {
+      if (tables.includes("calendar_events")) void loadAgenda();
+      if (tables.includes("health_records")) void loadSalud();
+      if (tables.includes("expenses")) void loadExpenses();
+      if (tables.includes("domains")) void loadDomains();
+      if (tables.includes("profiles")) void loadProfiles();
+    });
+  }, [loadAgenda, loadDomains, loadExpenses, loadProfiles, loadSalud]);
 
   useEffect(() => {
     if (!activeDomainName) {
@@ -1762,6 +1773,7 @@ export default function Home() {
             void (async () => {
               try {
                 await updateStressLevel(uid, n);
+                emitKoreUpdate(["profiles"]);
               } catch {
                 /* Supabase no disponible: mismo estado local + LS */
               }

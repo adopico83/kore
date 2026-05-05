@@ -11,6 +11,7 @@ import {
   type PointerEvent,
   type TouchEvent,
 } from "react";
+import { emitKoreUpdate } from "@/lib/kore-events";
 
 const GREEN = "#4CC9A0";
 const PURPLE = "#9B8FE8";
@@ -323,6 +324,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
       at: new Date().toISOString(),
     };
     setHistorial((prev) => [...prev, msg]);
+    emitKoreUpdate(["kore_notes"]);
     setMensaje("");
     setImagenesPendientes([]);
     setError("");

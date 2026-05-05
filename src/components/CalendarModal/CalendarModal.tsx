@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight, Pencil, Trash2, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { emitKoreUpdate } from "@/lib/kore-events";
 
 export type KoreAgendaEvent = {
   id: string;
@@ -146,6 +147,7 @@ export function CalendarModal({
       const horaVal = draftHora.trim();
       if (useRemote && onUpdateEvent) {
         await onUpdateEvent(agendaEditandoId, { titulo, hora: horaVal.length > 0 ? horaVal : null });
+        emitKoreUpdate(["calendar_events"]);
       } else if (onChange) {
         onChange(
           events.map((e) =>
@@ -168,6 +170,7 @@ export function CalendarModal({
         const fechaKey = (ev.fecha ?? "").slice(0, 10);
         if (useRemote && onDeleteEvent) {
           await onDeleteEvent(ev.id);
+          emitKoreUpdate(["calendar_events"]);
         } else if (onChange) {
           const next = events.filter((e) => e.id !== ev.id);
           onChange(next);
@@ -193,6 +196,7 @@ export function CalendarModal({
       const horaVal = nuevaHora.trim();
       if (useRemote && onAddEvent) {
         await onAddEvent({ titulo, fecha: diaDetalleFecha, hora: horaVal.length > 0 ? horaVal : null });
+        emitKoreUpdate(["calendar_events"]);
       } else if (onChange) {
         const nuevo: KoreAgendaEvent = {
           id: newId(),
