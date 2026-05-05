@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
+import { applyGuardrails, type PlannedTool } from "@/lib/agent/guardrails";
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
 import { getAgentMemory } from "@/lib/kore-db";
 
@@ -42,19 +43,6 @@ type ToolExecution = {
 };
 
 type IntentType = "ACCION" | "CONSULTA";
-type PlannedTool = { tool: string; args: Record<string, unknown> };
-type PlanValidationMeta = {
-  blocked: number;
-  normalizedDuplicates: number;
-};
-
-const ACTION_VERBS =
-  /\b(anade|agrega|registr|apunt|guard|borra|elimina|actualiz|complet|manda|envia|anota|recuerda|log|programa|limpiar|gastar|gastado)\b/i;
-const TIME_SIGNALS =
-  /\b(hoy|manana|pasado manana|esta noche|esta semana|el lunes|el martes|el miercoles|el jueves|el viernes|el sabado|el domingo|a las \d{1,2}(:\d{2})?|de \w+)\b/i;
-const DOMAIN_ENTITIES =
-  /\b(cita|pediatra|medicacion|gasto|euros|compra|lista|limpieza|menu|reunion|colegio|excursion|partido|futbol|dormido|despertado|mensaje|nota|recordatorio)\b/i;
-const REPLACE_VERBS = /\b(cambia|borra|sustituye|reemplaza)\b/i;
 
 function extractUserText(content: OpenAI.Chat.ChatCompletionMessageParam["content"] | undefined): string {
   if (typeof content === "string") return content;
@@ -70,23 +58,28 @@ function extractUserText(content: OpenAI.Chat.ChatCompletionMessageParam["conten
     .trim();
 }
 
-function normalizeText(input: string): string {
-  return (input ?? "")
+function detectIntent(lastUserMsg: string): IntentType {
+  const raw = (lastUserMsg ?? "").trim();
+  const text = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function detectIntent(lastUserMsg: string): IntentType {
-  const raw = (lastUserMsg ?? "").trim();
-  const text = normalizeText(raw);
   if (!text) return "CONSULTA";
   if (raw.includes("?") || /^¿/.test(raw)) return "CONSULTA";
-  const hasEntity = DOMAIN_ENTITIES.test(text);
-  const hasTime = TIME_SIGNALS.test(text);
-  const hasActionVerb = ACTION_VERBS.test(text);
+  const hasEntity =
+    /\b(cita|pediatra|medicacion|gasto|euros|compra|lista|limpieza|menu|reunion|colegio|excursion|partido|futbol|dormido|despertado|mensaje|nota|recordatorio)\b/i.test(
+      text,
+    );
+  const hasTime =
+    /\b(hoy|manana|pasado manana|esta noche|esta semana|el lunes|el martes|el miercoles|el jueves|el viernes|el sabado|el domingo|a las \d{1,2}(:\d{2})?|de \w+)\b/i.test(
+      text,
+    );
+  const hasActionVerb =
+    /\b(anade|agrega|registr|apunt|guard|borra|elimina|actualiz|complet|manda|envia|anota|recuerda|log|programa|limpiar|gastar|gastado)\b/i.test(
+      text,
+    );
   // Conservador: solo acción cuando las señales son claras y no ambiguas.
   const clearAction = (hasEntity && hasTime) || (hasEntity && hasActionVerb);
   return clearAction ? "ACCION" : "CONSULTA";
@@ -96,52 +89,16 @@ function sanitizeArgs(args: unknown): Record<string, unknown> {
   return args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
 }
 
-function isMutationTool(name: string): boolean {
-  return /^(add_|save_|log_|update_|clear_|delete_)/.test(name);
-}
-
 function isReadTool(name: string): boolean {
   return name.startsWith("get_");
-}
-
-function isDestructiveTool(name: string): boolean {
-  return name.startsWith("clear_") || name.startsWith("delete_");
 }
 
 function isCommunicationTool(name: string): boolean {
   return name === "send_note" || name === "add_kore_note";
 }
 
-function toolRank(name: string): number {
-  if (isDestructiveTool(name)) return 1;
-  if (/^(add_|save_|log_|update_)/.test(name)) return 2;
-  if (isCommunicationTool(name)) return 3;
-  if (isReadTool(name)) return 4;
-  return 5;
-}
-
-function toolDomain(name: string): string {
-  if (name.includes("calendar")) return "agenda";
-  if (name.includes("health") || name.includes("appointment") || name.includes("medication")) return "salud";
-  if (name.includes("expense")) return "economia";
-  if (name.includes("shopping")) return "compras";
-  if (name.includes("cleaning")) return "limpieza";
-  if (name.includes("menu")) return "menu";
-  if (name.includes("school")) return "colegio";
-  if (name.includes("leisure") || name.includes("personal_time") || name.includes("balance_summary")) return "ocio";
-  if (name.includes("sleep") || name.includes("wakeup") || name.includes("recovery")) return "sueno";
-  if (name.includes("note")) return "corcho";
-  if (name.includes("pattern") || name.includes("memory") || name.includes("insight")) return "memoria";
-  return "otros";
-}
-
-function estimateEntityCountForDomain(domain: string, userMsg: string): number {
-  const text = normalizeText(userMsg);
-  if (domain === "compras" || domain === "otros") {
-    const separators = (text.match(/\s+y\s|,|\stambien\s/g) ?? []).length;
-    return Math.min(5, Math.max(1, separators + 1));
-  }
-  return 1;
+function isDestructiveTool(name: string): boolean {
+  return name.startsWith("clear_") || name.startsWith("delete_");
 }
 
 function isDuplicateLikeError(err: string): boolean {
@@ -158,146 +115,6 @@ function normalizeToolResult(name: string, result: unknown): { success: boolean;
   return { success: true };
 }
 
-function validateAndOrderPlan(plan: PlannedTool[], userMsg: string): { ordered: PlannedTool[]; meta: PlanValidationMeta } {
-  let blocked = 0;
-  let out = [...plan];
-  const normalizedDuplicates = 0;
-
-  const normalizedUser = normalizeText(userMsg);
-  const allowReplace = REPLACE_VERBS.test(normalizedUser);
-
-  // 1) Menú exclusión clear+add mismo día salvo verbos sustitución
-  if (!allowReplace) {
-    const addDays = new Set(
-      out
-        .filter((p) => p.tool === "add_menu_item")
-        .map((p) => String(p.args.day ?? "").toLowerCase())
-        .filter(Boolean),
-    );
-    const prevLen = out.length;
-    out = out.filter((p) => !(p.tool === "clear_day_menu" && addDays.has(String(p.args.day ?? "").toLowerCase())));
-    blocked += prevLen - out.length;
-  }
-
-  // 2) Compras get_shopping_list: solo uno al final si hubo inserciones
-  const hadShoppingAdd = out.some((p) => p.tool === "add_shopping_item");
-  const shoppingGets = out.filter((p) => p.tool === "get_shopping_list");
-  if (shoppingGets.length > 0) {
-    out = out.filter((p) => p.tool !== "get_shopping_list");
-    blocked += shoppingGets.length;
-    if (hadShoppingAdd) {
-      out.push({ tool: "get_shopping_list", args: {} });
-      blocked -= 1; // uno permitido
-    }
-  }
-
-  // 3) Limpieza dedupe strict zone+assigned_to
-  const seenCleaning = new Set<string>();
-  out = out.filter((p) => {
-    if (p.tool !== "add_cleaning_task") return true;
-    const key = `${String(p.args.zone ?? "").toLowerCase()}|${String(p.args.assigned_to ?? "").toLowerCase()}`;
-    if (seenCleaning.has(key)) {
-      blocked += 1;
-      return false;
-    }
-    seenCleaning.add(key);
-    return true;
-  });
-
-  // 4) Agenda+Salud coexistencia: no exclusión (no-op explícito)
-
-  // Bloqueo mutación fantasma: máximo mutación principal por dominio (salvo multi-entidad explícita)
-  const domainMutationCount = new Map<string, number>();
-  const keep: PlannedTool[] = [];
-  for (const p of out) {
-    if (!isMutationTool(p.tool)) {
-      keep.push(p);
-      continue;
-    }
-    const domain = toolDomain(p.tool);
-    const current = domainMutationCount.get(domain) ?? 0;
-    const maxAllowed = estimateEntityCountForDomain(domain, userMsg);
-    if (current >= maxAllowed && !(domain === "salud" && (p.tool === "add_appointment" || p.tool === "add_calendar_event"))) {
-      blocked += 1;
-      continue;
-    }
-    domainMutationCount.set(domain, current + 1);
-    keep.push(p);
-  }
-  out = keep;
-
-  // Reordenar por jerarquía
-  out = out
-    .map((p, idx) => ({ p, idx }))
-    .sort((a, b) => {
-      const ra = toolRank(a.p.tool);
-      const rb = toolRank(b.p.tool);
-      if (ra !== rb) return ra - rb;
-      return a.idx - b.idx;
-    })
-    .map((x) => x.p);
-
-  // Máximo una lectura al final
-  const reads = out.filter((p) => isReadTool(p.tool));
-  if (reads.length > 1) {
-    out = out.filter((p) => !isReadTool(p.tool));
-    out.push(reads[reads.length - 1]);
-    blocked += reads.length - 1;
-  }
-
-  return { ordered: out, meta: { blocked, normalizedDuplicates } };
-}
-
-function enforceCalendarPairRule(plan: PlannedTool[]): PlannedTool[] {
-  const hasAppointment = plan.some((p) => p.tool === "add_appointment");
-  const hasSchoolEvent = plan.some((p) => p.tool === "add_school_event");
-  const hasCalendar = plan.some((p) => p.tool === "add_calendar_event");
-  if ((!hasAppointment && !hasSchoolEvent) || hasCalendar) return plan;
-
-  const source = hasAppointment
-    ? plan.find((p) => p.tool === "add_appointment")
-    : plan.find((p) => p.tool === "add_school_event");
-  if (!source) return plan;
-
-  const title =
-    source.tool === "add_appointment"
-      ? String(source.args.description ?? "Cita médica")
-      : String(source.args.title ?? "Evento");
-  const date = String(source.args.date ?? "").trim();
-  const time = String(source.args.time ?? "09:00").trim() || "09:00";
-  if (!date) return plan;
-
-  return [...plan, { tool: "add_calendar_event", args: { title, date, time } }];
-}
-
-function expandMultiEntityPlan(plan: PlannedTool[], userMsg: string): PlannedTool[] {
-  const normalized = normalizeText(userMsg);
-  const out: PlannedTool[] = [];
-  for (const p of plan) {
-    if (p.tool !== "add_shopping_item") {
-      out.push(p);
-      continue;
-    }
-    const nameRaw = String(p.args.name ?? "").trim();
-    if (!nameRaw) {
-      out.push(p);
-      continue;
-    }
-    const pieces = nameRaw
-      .split(/\s+y\s|,|\stambien\s/i)
-      .map((x) => x.trim())
-      .filter(Boolean);
-    const shouldSplit = pieces.length > 1 || / y |,| tambien /.test(normalized);
-    if (!shouldSplit || pieces.length <= 1) {
-      out.push(p);
-      continue;
-    }
-    for (const item of pieces) {
-      out.push({ tool: "add_shopping_item", args: { ...p.args, name: item } });
-    }
-  }
-  return out;
-}
 
 async function planToolsFromModel(params: {
   systemPrompt: string;
@@ -519,11 +336,8 @@ export async function POST(request: NextRequest) {
       if (planning.plan.length === 0) {
         reply = "Necesito un detalle más para registrarlo bien. ¿Me lo concretas?";
       } else {
-        let planned = expandMultiEntityPlan(planning.plan, lastUserMsg);
-        planned = enforceCalendarPairRule(planned);
-        const { ordered, meta } = validateAndOrderPlan(planned, lastUserMsg);
-        blockedByExclusion = meta.blocked;
-        normalizedDuplicateAsSuccess += meta.normalizedDuplicates;
+        const rawPlan = planning.plan;
+        const ordered = applyGuardrails(rawPlan, lastUserMsg);
         console.log("[api/agent] validated plan", {
           blockedByExclusion,
           orderedPlan: ordered,
@@ -584,7 +398,7 @@ export async function POST(request: NextRequest) {
             result,
             ...(errorMessage ? { error: errorMessage } : {}),
           });
-          if (success && (isMutationTool(step.tool) || isCommunicationTool(step.tool))) hasMutationSuccess = true;
+          if (success && (!isReadTool(step.tool) || isCommunicationTool(step.tool))) hasMutationSuccess = true;
         }
 
         // STOP TEMPRANO REFORMADO:
