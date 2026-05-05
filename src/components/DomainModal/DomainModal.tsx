@@ -1,9 +1,17 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
+import {
+  ANDER_ID,
+  addShoppingItem,
+  completeShoppingItem,
+  deleteShoppingItem,
+  getShoppingItems,
+  type ShoppingItemRow,
+} from "@/lib/kore-db";
 
 export type DomainItem = {
   id: string;
@@ -33,13 +41,24 @@ const cardStyle: CSSProperties = {
   padding: 12,
 };
 
+function isComprasDomainName(name: string): boolean {
+  return name.trim().toLowerCase() === "compras";
+}
+
 export function DomainModal({ domain, onClose, onSave, historyEntries, historyReadOnly }: DomainModalProps) {
   useEscapeKey(onClose);
+  const isCompras = isComprasDomainName(domain.name);
+
   const [owner, setOwner] = useState(domain.owner);
   const [stateText, setStateText] = useState(domain.state);
   const [notes, setNotes] = useState<string[]>(domain.notes ?? []);
   const [newNote, setNewNote] = useState("");
+  const [newShoppingName, setNewShoppingName] = useState("");
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItemRow[]>([]);
+  const [shoppingLoading, setShoppingLoading] = useState(false);
+
   const [history, setHistory] = useState<DomainHistoryEntry[]>(() => {
+    if (isComprasDomainName(domain.name)) return [];
     if (historyReadOnly) return historyEntries ?? [];
     if (historyEntries !== undefined) return historyEntries;
     try {
@@ -52,11 +71,30 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
     }
   });
 
+  const loadShoppingItems = useCallback(async () => {
+    setShoppingLoading(true);
+    try {
+      const rows = await getShoppingItems();
+      setShoppingItems(rows);
+    } catch {
+      setShoppingItems([]);
+    } finally {
+      setShoppingLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setOwner(domain.owner);
     setStateText(domain.state);
     setNotes(domain.notes ?? []);
     setNewNote("");
+    setNewShoppingName("");
+
+    if (isComprasDomainName(domain.name)) {
+      setHistory([]);
+      return;
+    }
+
     if (historyReadOnly) {
       setHistory(historyEntries ?? []);
       return;
@@ -76,7 +114,21 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
     } catch {
       setHistory([]);
     }
-  }, [domain.id, domain.owner, domain.state, domain.notes, historyEntries, historyReadOnly]);
+  }, [domain.id, domain.name, domain.owner, domain.state, domain.notes, historyEntries, historyReadOnly]);
+
+  useEffect(() => {
+    if (!isCompras) return;
+    void loadShoppingItems();
+  }, [isCompras, domain.id, loadShoppingItems]);
+
+  const pendingShopping = useMemo(
+    () => shoppingItems.filter((r) => !r.completed),
+    [shoppingItems],
+  );
+  const completedShopping = useMemo(() => {
+    const done = shoppingItems.filter((r) => r.completed);
+    return [...done].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  }, [shoppingItems]);
 
   const removeHistoryEntry = (entryId: string) => {
     if (historyReadOnly) return;
@@ -88,6 +140,41 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
       /* ignore */
     }
   };
+
+  const handleAddShoppingItem = async () => {
+    const name = newShoppingName.trim();
+    if (!name) return;
+    try {
+      await addShoppingItem({ name, created_by: ANDER_ID });
+      emitKoreUpdate(["shopping_items"]);
+      setNewShoppingName("");
+      await loadShoppingItems();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleCompleteShopping = async (id: string) => {
+    try {
+      await completeShoppingItem(id);
+      emitKoreUpdate(["shopping_items"]);
+      await loadShoppingItems();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleDeleteShopping = async (id: string) => {
+    try {
+      await deleteShoppingItem(id);
+      emitKoreUpdate(["shopping_items"]);
+      await loadShoppingItems();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const notesToSave = isCompras ? (domain.notes ?? []) : notes;
 
   return (
     <div
@@ -181,85 +268,221 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
           />
         </section>
 
-        <section style={cardStyle}>
-          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Notas / Tareas</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <input
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
-              placeholder="Añadir item"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                borderRadius: 8,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.05)",
-                color: "#e4e6ed",
-                padding: "8px 10px",
-                fontSize: 14,
-                outline: "none",
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                const value = newNote.trim();
-                if (!value) return;
-                setNotes((prev) => [...prev, value]);
-                setNewNote("");
-              }}
-              style={{
-                borderRadius: 8,
-                border: "none",
-                background: "#4CC9A0",
-                color: "#0a1a14",
-                padding: "0 12px",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              Añadir
-            </button>
-          </div>
-          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
-            {notes.map((note, i) => (
-              <li
-                key={`${note}-${i}`}
+        {isCompras ? (
+          <section style={cardStyle}>
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Lista de la compra</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input
+                value={newShoppingName}
+                onChange={(e) => setNewShoppingName(e.target.value)}
+                placeholder="Añadir item"
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
+                  flex: 1,
+                  minWidth: 0,
                   borderRadius: 8,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.04)",
-                  padding: "7px 9px",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "#e4e6ed",
+                  padding: "8px 10px",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void handleAddShoppingItem()}
+                style={{
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#4CC9A0",
+                  color: "#0a1a14",
+                  padding: "0 12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
                 }}
               >
-                <span style={{ fontSize: 13 }}>{note}</span>
-                <button
-                  type="button"
-                  onClick={() => setNotes((prev) => prev.filter((_, idx) => idx !== i))}
+                Añadir
+              </button>
+            </div>
+            {shoppingLoading ? (
+              <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Cargando lista…</p>
+            ) : pendingShopping.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>No hay items pendientes.</p>
+            ) : (
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+                {pendingShopping.map((item) => (
+                  <li
+                    key={item.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.04)",
+                      padding: "7px 9px",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <span style={{ fontSize: 13 }}>
+                        {item.name}
+                        {item.quantity ? ` (${item.quantity})` : ""}
+                      </span>
+                      <p style={{ margin: "4px 0 0", fontSize: 11, color: "rgba(228,230,237,0.55)" }}>
+                        {(item.category ?? "sin categoría")} · {(item.priority ?? "sin prioridad")}
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => void handleCompleteShopping(item.id)}
+                        style={{
+                          border: "none",
+                          borderRadius: 8,
+                          background: "#4CC9A0",
+                          color: "#0a1a14",
+                          padding: "6px 10px",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                          fontSize: 12,
+                        }}
+                      >
+                        Completar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteShopping(item.id)}
+                        style={{
+                          border: "1px solid rgba(255,255,255,0.15)",
+                          borderRadius: 8,
+                          background: "transparent",
+                          color: "#e4e6ed",
+                          padding: "6px 10px",
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : (
+          <section style={cardStyle}>
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Notas / Tareas</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="Añadir item"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "#e4e6ed",
+                  padding: "8px 10px",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const value = newNote.trim();
+                  if (!value) return;
+                  setNotes((prev) => [...prev, value]);
+                  setNewNote("");
+                }}
+                style={{
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#4CC9A0",
+                  color: "#0a1a14",
+                  padding: "0 12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Añadir
+              </button>
+            </div>
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+              {notes.map((note, i) => (
+                <li
+                  key={`${note}-${i}`}
                   style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "rgba(228,230,237,0.65)",
-                    cursor: "pointer",
-                    fontSize: 14,
-                    lineHeight: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(255,255,255,0.04)",
+                    padding: "7px 9px",
                   }}
-                  aria-label="Eliminar nota"
                 >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+                  <span style={{ fontSize: 13 }}>{note}</span>
+                  <button
+                    type="button"
+                    onClick={() => setNotes((prev) => prev.filter((_, idx) => idx !== i))}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "rgba(228,230,237,0.65)",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      lineHeight: 1,
+                    }}
+                    aria-label="Eliminar nota"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section style={cardStyle}>
           <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Historial</p>
-          {history.length === 0 ? (
+          {isCompras ? (
+            completedShopping.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Sin items completados aún</p>
+            ) : (
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+                {completedShopping.map((item) => {
+                  const d = new Date(item.created_at);
+                  const fecha = Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("es-ES");
+                  const hora = Number.isNaN(d.getTime())
+                    ? ""
+                    : d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false });
+                  const text = `${item.name}${item.quantity ? ` (${item.quantity})` : ""}`;
+                  return (
+                    <li
+                      key={item.id}
+                      style={{
+                        borderRadius: 8,
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        background: "rgba(255,255,255,0.04)",
+                        padding: "8px 9px",
+                      }}
+                    >
+                      <p style={{ margin: 0, fontSize: 11, color: "rgba(228,230,237,0.55)" }}>
+                        {fecha} {hora}
+                      </p>
+                      <p style={{ margin: "4px 0 0", fontSize: 13, color: "#e4e6ed", whiteSpace: "pre-wrap" }}>{text}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+          ) : history.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Sin registros aún</p>
           ) : (
             <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -323,7 +546,7 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
         <button
           type="button"
           onClick={() =>
-            void Promise.resolve(onSave({ owner, state: stateText.trim(), notes })).then(() =>
+            void Promise.resolve(onSave({ owner, state: stateText.trim(), notes: notesToSave })).then(() =>
               emitKoreUpdate(["domains"]),
             )
           }

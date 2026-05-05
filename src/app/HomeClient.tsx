@@ -6,7 +6,6 @@ import { CorchoHistorial } from "@/components/CorchoHistorial";
 import { DomainModal, type DomainItem } from "@/components/DomainModal";
 import { EconomiaModal, type ExpenseItem } from "@/components/EconomiaModal";
 import { PerfilModal, type PerfilNavigateTipo, type PerfilUsuario } from "@/components/PerfilModal";
-import { ShoppingModal } from "@/components/ShoppingModal/ShoppingModal";
 import { SaludResumenModal } from "@/components/SaludResumenModal";
 import { SaludModal, type SaludData } from "@/components/SaludModal";
 import {
@@ -265,10 +264,6 @@ function mergedDomainCard(row: KoreDomainRow): DomainCard {
   };
 }
 
-function isComprasDomain(name: string): boolean {
-  return name.trim().toLowerCase() === "compras";
-}
-
 function mergeDomainsWithFallback(primary: DomainCard[], fallback: DomainCard[]): DomainCard[] {
   const normalizeDomainKey = (name: string) => name.trim().toLowerCase();
   const byName = new Map(primary.map((d) => [normalizeDomainKey(d.name), d]));
@@ -356,7 +351,6 @@ export function HomeClient() {
   const [showCorcho, setShowCorcho] = useState(false);
   const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
   const [showEconomia, setShowEconomia] = useState(false);
-  const [showShopping, setShowShopping] = useState(false);
   const [showSalud, setShowSalud] = useState(false);
   const [showSaludResumen, setShowSaludResumen] = useState(false);
   const [showPerfil, setShowPerfil] = useState(false);
@@ -699,10 +693,6 @@ export function HomeClient() {
     if (tipo === "domain") {
       const selectedDomain = domains.find((d) => d.id === id);
       if (selectedDomain) {
-        if (isComprasDomain(selectedDomain.name)) {
-          setShowShopping(true);
-          return;
-        }
         setActiveDomainName(selectedDomain.name);
       }
     }
@@ -1113,13 +1103,7 @@ export function HomeClient() {
                   <button
                     key={d.id || d.name}
                     type="button"
-                    onClick={() => {
-                      if (isComprasDomain(d.name)) {
-                        setShowShopping(true);
-                        return;
-                      }
-                      setActiveDomainName(d.name);
-                    }}
+                    onClick={() => setActiveDomainName(d.name)}
                     onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
                     onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                     onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
@@ -1265,13 +1249,7 @@ export function HomeClient() {
                   <button
                     key={d.id || d.name}
                     type="button"
-                    onClick={() => {
-                      if (isComprasDomain(d.name)) {
-                        setShowShopping(true);
-                        return;
-                      }
-                      setActiveDomainName(d.name);
-                    }}
+                    onClick={() => setActiveDomainName(d.name)}
                     onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
                     onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                     onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
@@ -1898,7 +1876,6 @@ export function HomeClient() {
           onChange={(items) => setExpenses(items)}
         />
       ) : null}
-      {showShopping ? <ShoppingModal onClose={() => setShowShopping(false)} /> : null}
       {showSalud ? (
         <SaludModal
           onClose={() => setShowSalud(false)}
