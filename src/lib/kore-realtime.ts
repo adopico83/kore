@@ -11,6 +11,10 @@ const REALTIME_TABLES = [
   "calendar_events",
   "domains",
   "profiles",
+  "shopping_items",
+  "cleaning_tasks",
+  "menu_items",
+  "sleep_logs",
 ] as const;
 
 export type KoreRealtimeTable = (typeof REALTIME_TABLES)[number];
