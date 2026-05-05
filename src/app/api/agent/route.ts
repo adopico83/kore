@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
-import { getAgentMemory, getKoreSupabaseServerClient } from "@/lib/kore-db";
+import { getAgentMemory } from "@/lib/kore-db";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -32,13 +32,326 @@ function normalizarImagenDataUrl(imagen: string): string | null {
   return s;
 }
 
-const MAX_TOOL_ROUNDS = 14;
+const MAX_TOOL_ROUNDS = 5;
+
+type ToolExecution = {
+  name: string;
+  success: boolean;
+  result: unknown;
+  error?: string;
+};
+
+type IntentType = "ACCION" | "CONSULTA";
+type PlannedTool = { tool: string; args: Record<string, unknown> };
+type PlanValidationMeta = {
+  blocked: number;
+  normalizedDuplicates: number;
+};
+
+const ACTION_VERBS =
+  /\b(anade|agrega|registr|apunt|guard|borra|elimina|actualiz|complet|manda|envia|anota|recuerda|log|programa|limpiar|gastar|gastado)\b/i;
+const TIME_SIGNALS =
+  /\b(hoy|manana|pasado manana|esta noche|esta semana|el lunes|el martes|el miercoles|el jueves|el viernes|el sabado|el domingo|a las \d{1,2}(:\d{2})?|de \w+)\b/i;
+const DOMAIN_ENTITIES =
+  /\b(cita|pediatra|medicacion|gasto|euros|compra|lista|limpieza|menu|reunion|colegio|excursion|partido|futbol|dormido|despertado|mensaje|nota|recordatorio)\b/i;
+const REPLACE_VERBS = /\b(cambia|borra|sustituye|reemplaza)\b/i;
+
+function extractUserText(content: OpenAI.Chat.ChatCompletionMessageParam["content"] | undefined): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (part && typeof part === "object" && "type" in part && part.type === "text") {
+        return typeof part.text === "string" ? part.text : "";
+      }
+      return "";
+    })
+    .join(" ")
+    .trim();
+}
+
+function normalizeText(input: string): string {
+  return (input ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectIntent(lastUserMsg: string): IntentType {
+  const raw = (lastUserMsg ?? "").trim();
+  const text = normalizeText(raw);
+  if (!text) return "CONSULTA";
+  if (raw.includes("?") || /^¿/.test(raw)) return "CONSULTA";
+  const hasEntity = DOMAIN_ENTITIES.test(text);
+  const hasTime = TIME_SIGNALS.test(text);
+  const hasActionVerb = ACTION_VERBS.test(text);
+  // Conservador: solo acción cuando las señales son claras y no ambiguas.
+  const clearAction = (hasEntity && hasTime) || (hasEntity && hasActionVerb);
+  return clearAction ? "ACCION" : "CONSULTA";
+}
+
+function sanitizeArgs(args: unknown): Record<string, unknown> {
+  return args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
+}
+
+function isMutationTool(name: string): boolean {
+  return /^(add_|save_|log_|update_|clear_|delete_)/.test(name);
+}
+
+function isReadTool(name: string): boolean {
+  return name.startsWith("get_");
+}
+
+function isDestructiveTool(name: string): boolean {
+  return name.startsWith("clear_") || name.startsWith("delete_");
+}
+
+function isCommunicationTool(name: string): boolean {
+  return name === "send_note" || name === "add_kore_note";
+}
+
+function toolRank(name: string): number {
+  if (isDestructiveTool(name)) return 1;
+  if (/^(add_|save_|log_|update_)/.test(name)) return 2;
+  if (isCommunicationTool(name)) return 3;
+  if (isReadTool(name)) return 4;
+  return 5;
+}
+
+function toolDomain(name: string): string {
+  if (name.includes("calendar")) return "agenda";
+  if (name.includes("health") || name.includes("appointment") || name.includes("medication")) return "salud";
+  if (name.includes("expense")) return "economia";
+  if (name.includes("shopping")) return "compras";
+  if (name.includes("cleaning")) return "limpieza";
+  if (name.includes("menu")) return "menu";
+  if (name.includes("school")) return "colegio";
+  if (name.includes("leisure") || name.includes("personal_time") || name.includes("balance_summary")) return "ocio";
+  if (name.includes("sleep") || name.includes("wakeup") || name.includes("recovery")) return "sueno";
+  if (name.includes("note")) return "corcho";
+  if (name.includes("pattern") || name.includes("memory") || name.includes("insight")) return "memoria";
+  return "otros";
+}
+
+function estimateEntityCountForDomain(domain: string, userMsg: string): number {
+  const text = normalizeText(userMsg);
+  if (domain === "compras" || domain === "otros") {
+    const separators = (text.match(/\s+y\s|,|\stambien\s/g) ?? []).length;
+    return Math.min(5, Math.max(1, separators + 1));
+  }
+  return 1;
+}
+
+function isDuplicateLikeError(err: string): boolean {
+  const s = err.toLowerCase();
+  return s.includes("already exists") || s.includes("duplicate") || s.includes("ya existe") || s.includes("23505");
+}
+
+function normalizeToolResult(name: string, result: unknown): { success: boolean; error?: string } {
+  if (result && typeof result === "object" && "error" in result && typeof (result as { error?: unknown }).error === "string") {
+    const err = String((result as { error: string }).error);
+    if (isDuplicateLikeError(err)) return { success: true };
+    return { success: false, error: err };
+  }
+  return { success: true };
+}
+
+function validateAndOrderPlan(plan: PlannedTool[], userMsg: string): { ordered: PlannedTool[]; meta: PlanValidationMeta } {
+  let blocked = 0;
+  let out = [...plan];
+  const normalizedDuplicates = 0;
+
+  const normalizedUser = normalizeText(userMsg);
+  const allowReplace = REPLACE_VERBS.test(normalizedUser);
+
+  // 1) Menú exclusión clear+add mismo día salvo verbos sustitución
+  if (!allowReplace) {
+    const addDays = new Set(
+      out
+        .filter((p) => p.tool === "add_menu_item")
+        .map((p) => String(p.args.day ?? "").toLowerCase())
+        .filter(Boolean),
+    );
+    const prevLen = out.length;
+    out = out.filter((p) => !(p.tool === "clear_day_menu" && addDays.has(String(p.args.day ?? "").toLowerCase())));
+    blocked += prevLen - out.length;
+  }
+
+  // 2) Compras get_shopping_list: solo uno al final si hubo inserciones
+  const hadShoppingAdd = out.some((p) => p.tool === "add_shopping_item");
+  const shoppingGets = out.filter((p) => p.tool === "get_shopping_list");
+  if (shoppingGets.length > 0) {
+    out = out.filter((p) => p.tool !== "get_shopping_list");
+    blocked += shoppingGets.length;
+    if (hadShoppingAdd) {
+      out.push({ tool: "get_shopping_list", args: {} });
+      blocked -= 1; // uno permitido
+    }
+  }
+
+  // 3) Limpieza dedupe strict zone+assigned_to
+  const seenCleaning = new Set<string>();
+  out = out.filter((p) => {
+    if (p.tool !== "add_cleaning_task") return true;
+    const key = `${String(p.args.zone ?? "").toLowerCase()}|${String(p.args.assigned_to ?? "").toLowerCase()}`;
+    if (seenCleaning.has(key)) {
+      blocked += 1;
+      return false;
+    }
+    seenCleaning.add(key);
+    return true;
+  });
+
+  // 4) Agenda+Salud coexistencia: no exclusión (no-op explícito)
+
+  // Bloqueo mutación fantasma: máximo mutación principal por dominio (salvo multi-entidad explícita)
+  const domainMutationCount = new Map<string, number>();
+  const keep: PlannedTool[] = [];
+  for (const p of out) {
+    if (!isMutationTool(p.tool)) {
+      keep.push(p);
+      continue;
+    }
+    const domain = toolDomain(p.tool);
+    const current = domainMutationCount.get(domain) ?? 0;
+    const maxAllowed = estimateEntityCountForDomain(domain, userMsg);
+    if (current >= maxAllowed && !(domain === "salud" && (p.tool === "add_appointment" || p.tool === "add_calendar_event"))) {
+      blocked += 1;
+      continue;
+    }
+    domainMutationCount.set(domain, current + 1);
+    keep.push(p);
+  }
+  out = keep;
+
+  // Reordenar por jerarquía
+  out = out
+    .map((p, idx) => ({ p, idx }))
+    .sort((a, b) => {
+      const ra = toolRank(a.p.tool);
+      const rb = toolRank(b.p.tool);
+      if (ra !== rb) return ra - rb;
+      return a.idx - b.idx;
+    })
+    .map((x) => x.p);
+
+  // Máximo una lectura al final
+  const reads = out.filter((p) => isReadTool(p.tool));
+  if (reads.length > 1) {
+    out = out.filter((p) => !isReadTool(p.tool));
+    out.push(reads[reads.length - 1]);
+    blocked += reads.length - 1;
+  }
+
+  return { ordered: out, meta: { blocked, normalizedDuplicates } };
+}
+
+function enforceCalendarPairRule(plan: PlannedTool[]): PlannedTool[] {
+  const hasAppointment = plan.some((p) => p.tool === "add_appointment");
+  const hasSchoolEvent = plan.some((p) => p.tool === "add_school_event");
+  const hasCalendar = plan.some((p) => p.tool === "add_calendar_event");
+  if ((!hasAppointment && !hasSchoolEvent) || hasCalendar) return plan;
+
+  const source = hasAppointment
+    ? plan.find((p) => p.tool === "add_appointment")
+    : plan.find((p) => p.tool === "add_school_event");
+  if (!source) return plan;
+
+  const title =
+    source.tool === "add_appointment"
+      ? String(source.args.description ?? "Cita médica")
+      : String(source.args.title ?? "Evento");
+  const date = String(source.args.date ?? "").trim();
+  const time = String(source.args.time ?? "09:00").trim() || "09:00";
+  if (!date) return plan;
+
+  return [...plan, { tool: "add_calendar_event", args: { title, date, time } }];
+}
+
+function expandMultiEntityPlan(plan: PlannedTool[], userMsg: string): PlannedTool[] {
+  const normalized = normalizeText(userMsg);
+  const out: PlannedTool[] = [];
+  for (const p of plan) {
+    if (p.tool !== "add_shopping_item") {
+      out.push(p);
+      continue;
+    }
+    const nameRaw = String(p.args.name ?? "").trim();
+    if (!nameRaw) {
+      out.push(p);
+      continue;
+    }
+    const pieces = nameRaw
+      .split(/\s+y\s|,|\stambien\s/i)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const shouldSplit = pieces.length > 1 || / y |,| tambien /.test(normalized);
+    if (!shouldSplit || pieces.length <= 1) {
+      out.push(p);
+      continue;
+    }
+    for (const item of pieces) {
+      out.push({ tool: "add_shopping_item", args: { ...p.args, name: item } });
+    }
+  }
+  return out;
+}
+
+async function planToolsFromModel(params: {
+  systemPrompt: string;
+  historialLimpio: OpenAI.Chat.ChatCompletionMessageParam[];
+  userParts: OpenAI.Chat.ChatCompletionContentPart[];
+  toolChoice: "auto" | "required";
+  retryHint?: string;
+}): Promise<{ plan: PlannedTool[]; rawCount: number }> {
+  const planningSystem = `${params.systemPrompt}
+
+FASE DE PLANIFICACIÓN:
+Devuelve únicamente el plan de herramientas a ejecutar para este mensaje.
+No redactes respuesta al usuario.
+`;
+
+  const planningMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: planningSystem },
+    ...params.historialLimpio,
+    {
+      role: "user",
+      content: [
+        ...params.userParts,
+        ...(params.retryHint ? [{ type: "text" as const, text: params.retryHint }] : []),
+      ],
+    },
+  ];
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: planningMessages,
+    tools: allTools,
+    tool_choice: params.toolChoice,
+    temperature: 0.2,
+    max_tokens: 1000,
+  });
+
+  const msg = completion.choices[0]?.message;
+  const calls = msg?.tool_calls ?? [];
+  const plan = calls
+    .filter((tc): tc is OpenAI.Chat.ChatCompletionMessageToolCall & { type: "function" } => tc.type === "function")
+    .map((tc) => {
+      let parsed: unknown = {};
+      try {
+        parsed = JSON.parse(tc.function.arguments || "{}");
+      } catch {
+        parsed = {};
+      }
+      return { tool: tc.function.name, args: sanitizeArgs(parsed) };
+    });
+  return { plan, rawCount: calls.length };
+}
 
 export async function POST(request: NextRequest) {
   try {
-    // Fuerza la inicialización del cliente server para este request y valida entorno.
-    getKoreSupabaseServerClient();
-
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "Falta OPENAI_API_KEY en el entorno del servidor" },
@@ -97,10 +410,20 @@ export async function POST(request: NextRequest) {
       { role: "user", content: userParts },
     ];
 
-    const toolsExecuted: { name: string; result: unknown }[] = [];
-    let reply = "";
+    const lastUserMsg = extractUserText(
+      [...messages].reverse().find((m) => m.role === "user")?.content,
+    );
+    const intent = detectIntent(lastUserMsg);
+    const toolChoice: "auto" | "required" = intent === "ACCION" ? "required" : "auto";
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const toolsExecuted: ToolExecution[] = [];
+    const executedCallSignatures = new Set<string>(); // sesión actual/request
+    let reply = "";
+    let blockedByExclusion = 0;
+    let normalizedDuplicateAsSuccess = 0;
+
+    if (intent === "CONSULTA") {
+      // Flujo directo de consulta sin fase de planificación estricta.
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages,
@@ -109,50 +432,228 @@ export async function POST(request: NextRequest) {
         temperature: 0.5,
         max_tokens: 1600,
       });
-
       const msg = completion.choices[0]?.message;
       if (!msg) {
         return NextResponse.json({ error: "Respuesta vacía del modelo" }, { status: 502 });
       }
-
-      messages.push(msg);
-
       const calls = msg.tool_calls;
+      console.log("[api/agent] GPT tool_calls", {
+        phase: "consulta-directa",
+        count: calls?.length ?? 0,
+        calls: (calls ?? []).map((tc) =>
+          tc.type === "function"
+            ? { id: tc.id, type: tc.type, name: tc.function.name, arguments: tc.function.arguments }
+            : { id: tc.id, type: tc.type },
+        ),
+      });
       if (!calls?.length) {
         reply = msg.content?.trim() ?? "";
-        break;
+      } else {
+        // Si consulta trae tools, ejecutar solo esa tanda (sin rondas libres)
+        for (const tc of calls) {
+          if (tc.type !== "function") continue;
+          const name = tc.function.name;
+          let args: unknown = {};
+          try {
+            args = JSON.parse(tc.function.arguments || "{}");
+          } catch {
+            args = {};
+          }
+          const signature = `${name}:${JSON.stringify(args)}`;
+          if (executedCallSignatures.has(signature)) continue;
+          executedCallSignatures.add(signature);
+          let result: unknown;
+          let success = false;
+          let errorMessage: string | undefined;
+          try {
+            result = await executeTool(name, args);
+            const normalized = normalizeToolResult(name, result);
+            success = normalized.success;
+            errorMessage = normalized.error;
+            if (normalized.success && normalized.error == null && result && typeof result === "object" && "error" in result) {
+              normalizedDuplicateAsSuccess += 1;
+            }
+          } catch (e) {
+            errorMessage = e instanceof Error ? e.message : "Error al ejecutar herramienta";
+            if (isDuplicateLikeError(errorMessage)) {
+              success = true;
+              result = { ok: true, normalized_duplicate: true };
+              normalizedDuplicateAsSuccess += 1;
+              errorMessage = undefined;
+            } else {
+              result = { error: errorMessage };
+            }
+          }
+          toolsExecuted.push({ name, success, result, ...(errorMessage ? { error: errorMessage } : {}) });
+        }
+      }
+    } else {
+      // FASE 1 — Planning
+      let planning = await planToolsFromModel({
+        systemPrompt,
+        historialLimpio,
+        userParts,
+        toolChoice,
+      });
+      console.log("[api/agent] planning phase output", {
+        intent,
+        rawCount: planning.rawCount,
+        plan: planning.plan,
+      });
+
+      if (planning.plan.length === 0) {
+        planning = await planToolsFromModel({
+          systemPrompt,
+          historialLimpio,
+          userParts,
+          toolChoice: "required",
+          retryHint: "No encontré tools para esta acción, intenta de nuevo con tools específicas.",
+        });
+        console.log("[api/agent] planning retry output", {
+          intent,
+          rawCount: planning.rawCount,
+          plan: planning.plan,
+        });
       }
 
-      for (const tc of calls) {
-        if (tc.type !== "function") continue;
-        const name = tc.function.name;
-        let args: unknown = {};
-        try {
-          args = JSON.parse(tc.function.arguments || "{}");
-        } catch {
-          args = {};
-        }
-        let result: unknown;
-        try {
-          result = await executeTool(name, args);
-        } catch (e) {
-          result = { error: e instanceof Error ? e.message : "Error al ejecutar herramienta" };
-        }
-        toolsExecuted.push({ name, result });
-        messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(result),
+      if (planning.plan.length === 0) {
+        reply = "Necesito un detalle más para registrarlo bien. ¿Me lo concretas?";
+      } else {
+        let planned = expandMultiEntityPlan(planning.plan, lastUserMsg);
+        planned = enforceCalendarPairRule(planned);
+        const { ordered, meta } = validateAndOrderPlan(planned, lastUserMsg);
+        blockedByExclusion = meta.blocked;
+        normalizedDuplicateAsSuccess += meta.normalizedDuplicates;
+        console.log("[api/agent] validated plan", {
+          blockedByExclusion,
+          orderedPlan: ordered,
         });
+
+        // FASE 2 — ejecución blindada (sin rondas libres)
+        // Ejecutar TODAS las categorías antes de respuesta final:
+        // destructive -> writes -> communication -> reads (máx 1 al final).
+        const destructive = ordered.filter((s) => isDestructiveTool(s.tool));
+        const writes = ordered.filter(
+          (s) => /^(add_|log_|save_|update_)/.test(s.tool) && !isCommunicationTool(s.tool),
+        );
+        const communication = ordered.filter((s) => isCommunicationTool(s.tool));
+        const reads = ordered.filter((s) => isReadTool(s.tool));
+        const executionQueue = [...destructive, ...writes, ...communication];
+        let hasMutationSuccess = false;
+
+        for (const step of executionQueue) {
+          const signature = `${step.tool}:${JSON.stringify(step.args)}`;
+          if (executedCallSignatures.has(signature)) {
+            const duplicateResult = { error: "Tool duplicada evitada: ya se ejecutó en esta sesión con los mismos argumentos." };
+            toolsExecuted.push({
+              name: step.tool,
+              success: false,
+              result: duplicateResult,
+              error: duplicateResult.error,
+            });
+            continue;
+          }
+          executedCallSignatures.add(signature);
+
+          let result: unknown;
+          let success = false;
+          let errorMessage: string | undefined;
+          try {
+            result = await executeTool(step.tool, step.args);
+            const normalized = normalizeToolResult(step.tool, result);
+            success = normalized.success;
+            errorMessage = normalized.error;
+            if (success && normalized.error == null && result && typeof result === "object" && "error" in result) {
+              normalizedDuplicateAsSuccess += 1;
+            }
+          } catch (e) {
+            const rawErr = e instanceof Error ? e.message : "Error al ejecutar herramienta";
+            if (isDuplicateLikeError(rawErr)) {
+              success = true;
+              result = { ok: true, normalized_duplicate: true };
+              normalizedDuplicateAsSuccess += 1;
+            } else {
+              success = false;
+              errorMessage = rawErr;
+              result = { error: rawErr };
+            }
+          }
+          toolsExecuted.push({
+            name: step.tool,
+            success,
+            result,
+            ...(errorMessage ? { error: errorMessage } : {}),
+          });
+          if (success && (isMutationTool(step.tool) || isCommunicationTool(step.tool))) hasMutationSuccess = true;
+        }
+
+        // STOP TEMPRANO REFORMADO:
+        // Sólo tras agotar todas las mutaciones. Lecturas opcionales al final (máx 1).
+        if (reads.length > 0) {
+          const readStep = reads[reads.length - 1];
+          const signature = `${readStep.tool}:${JSON.stringify(readStep.args)}`;
+          if (!executedCallSignatures.has(signature)) {
+            executedCallSignatures.add(signature);
+            let result: unknown;
+            let success = false;
+            let errorMessage: string | undefined;
+            try {
+              result = await executeTool(readStep.tool, readStep.args);
+              const normalized = normalizeToolResult(readStep.tool, result);
+              success = normalized.success;
+              errorMessage = normalized.error;
+            } catch (e) {
+              const rawErr = e instanceof Error ? e.message : "Error al ejecutar herramienta";
+              if (isDuplicateLikeError(rawErr)) {
+                success = true;
+                result = { ok: true, normalized_duplicate: true };
+                normalizedDuplicateAsSuccess += 1;
+              } else {
+                success = false;
+                errorMessage = rawErr;
+                result = { error: rawErr };
+              }
+            }
+            toolsExecuted.push({
+              name: readStep.tool,
+              success,
+              result,
+              ...(errorMessage ? { error: errorMessage } : {}),
+            });
+          }
+        }
+
+        if (hasMutationSuccess) {
+          reply = "Listo, ya está hecho. Si quieres, te enseño un resumen.";
+        }
       }
     }
 
     if (!reply) {
-      reply =
-        toolsExecuted.length > 0
-          ? "Listo, he aplicado los cambios que pedías."
-          : "No he podido generar una respuesta; prueba de nuevo.";
+      const failures = toolsExecuted.filter((t) => !t.success);
+      const hasSuccess = toolsExecuted.some((t) => t.success);
+      if (hasSuccess) {
+        reply = "Listo, ya está hecho.";
+      } else if (failures.length > 0) {
+        const details = failures
+          .map((f) => `- ${f.name}: ${f.error ?? "Error no especificado"}`)
+          .join("\n");
+        reply = `He encontrado errores al ejecutar algunas acciones:\n${details}\n\nNo he podido completar todo correctamente.`;
+      } else {
+        reply =
+          toolsExecuted.length > 0
+            ? "Listo, he aplicado los cambios que pedías."
+            : "No he podido generar una respuesta; prueba de nuevo.";
+      }
     }
+
+    console.log("[api/agent] final summary", {
+      intent,
+      toolsExecuted: toolsExecuted.length,
+      blockedByExclusion,
+      normalizedDuplicateAsSuccess,
+      reply,
+    });
 
     return NextResponse.json({ reply, toolsExecuted, respuesta: reply });
   } catch (e) {
