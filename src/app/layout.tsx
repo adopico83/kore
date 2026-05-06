@@ -27,6 +27,7 @@ export default function RootLayout({
   return (
     <html lang="es" className="h-full antialiased">
       <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#4CC9A0" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

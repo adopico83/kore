@@ -66,3 +66,9 @@ header > div:first-of-type > p {
     transform: rotate(360deg);
   }
 }
+
+input,
+textarea,
+select {
+  font-size: 16px !important;
+}
