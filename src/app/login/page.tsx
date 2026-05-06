@@ -1,8 +1,96 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
+
+/** Fondo animado: tres ondas sinusoidales finas (canvas nativo). */
+function LoginSineCanvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let raf = 0;
+    let width = 0;
+    let height = 0;
+    let dpr = 1;
+    let start = 0;
+
+    const lines = [
+      { color: "#4CC9A0", opacity: 0.35, amp: 0.072, kx: 0.013, speed: 0.85, y0: 0.36 },
+      { color: "#9B8FE8", opacity: 0.3, amp: 0.058, kx: 0.018, speed: -0.72, y0: 0.5 },
+      { color: "#4CC9A0", opacity: 0.2, amp: 0.046, kx: 0.021, speed: 0.55, y0: 0.64 },
+    ];
+
+    const resize = () => {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    const tick = (now: number) => {
+      if (!start) start = now;
+      const t = (now - start) * 0.00009;
+
+      ctx.fillStyle = "#0d1117";
+      ctx.fillRect(0, 0, width, height);
+      ctx.lineWidth = 0.8;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+
+      for (const L of lines) {
+        ctx.strokeStyle = L.color;
+        ctx.globalAlpha = L.opacity;
+        ctx.beginPath();
+        const baseY = height * L.y0;
+        const amp = height * L.amp;
+        const phase = t * L.speed;
+        for (let x = 0; x <= width; x += 1.25) {
+          const y = baseY + amp * Math.sin(x * L.kx + phase);
+          if (x === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    resize();
+    window.addEventListener("resize", resize);
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        zIndex: 0,
+      }}
+    />
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,7 +112,6 @@ export default function LoginPage() {
         email: email.trim(),
         password,
       });
-      console.log("AUTH RESULT:", authError);
 
       if (authError) {
         setError(authError.message || "No se pudo iniciar sesión.");
@@ -43,7 +130,7 @@ export default function LoginPage() {
     <main
       style={{
         minHeight: "100dvh",
-        backgroundColor: "#090b10",
+        backgroundColor: "#0d1117",
         color: "#e4e6ed",
         display: "flex",
         flexDirection: "column",
@@ -51,200 +138,171 @@ export default function LoginPage() {
         overflow: "hidden",
       }}
     >
-      <svg
-        aria-hidden
-        viewBox="0 0 1440 960"
-        preserveAspectRatio="none"
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
-      >
-        <defs>
-          <pattern id="kore-login-diag-a" width="34" height="34" patternUnits="userSpaceOnUse" patternTransform="rotate(30)">
-            <line x1="0" y1="0" x2="0" y2="34" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-          </pattern>
-          <pattern id="kore-login-diag-b" width="34" height="34" patternUnits="userSpaceOnUse" patternTransform="rotate(-30)">
-            <line x1="0" y1="0" x2="0" y2="34" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
-          </pattern>
-          <radialGradient id="kore-login-green" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(180 120) rotate(0) scale(520 380)">
-            <stop offset="0" stopColor="#4CC9A0" stopOpacity="0.08" />
-            <stop offset="1" stopColor="#4CC9A0" stopOpacity="0" />
-          </radialGradient>
-          <radialGradient id="kore-login-purple" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1260 100) rotate(0) scale(520 380)">
-            <stop offset="0" stopColor="#9B8FE8" stopOpacity="0.08" />
-            <stop offset="1" stopColor="#9B8FE8" stopOpacity="0" />
-          </radialGradient>
-        </defs>
-        <rect width="1440" height="960" fill="#090b10" />
-        <rect width="1440" height="960" fill="url(#kore-login-diag-a)" />
-        <rect width="1440" height="960" fill="url(#kore-login-diag-b)" />
-        <rect width="1440" height="960" fill="url(#kore-login-green)" />
-        <rect width="1440" height="960" fill="url(#kore-login-purple)" />
-      </svg>
+      <LoginSineCanvas />
 
-      <section
+      <div
         style={{
-          minHeight: "56dvh",
+          position: "relative",
+          zIndex: 1,
+          flex: 1,
           display: "flex",
           flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "32px 20px 18px",
-          textAlign: "center",
-          position: "relative",
-          zIndex: 1,
+          minHeight: 0,
         }}
       >
-        <svg
-          width="40"
-          height="40"
-          viewBox="0 0 160 160"
-          fill="none"
-          aria-hidden
-          style={{ width: "min(55vw, 220px)", height: "auto" }}
-        >
-          <rect width="160" height="160" rx="36" fill="#0b0d13" />
-          <circle cx="62" cy="80" r="44" stroke="#4CC9A0" strokeWidth="1.8" fill="none" />
-          <circle cx="98" cy="80" r="44" stroke="#9B8FE8" strokeWidth="1.8" fill="none" />
-          <circle cx="82" cy="80" r="5" fill="white" opacity="0.95" />
-          <circle cx="82" cy="80" r="14" fill="white" opacity="0.05" />
-        </svg>
-        <h1
+        <section
           style={{
-            margin: "20px 0 6px",
-            fontFamily: "var(--font-dm-sans), sans-serif",
-            fontSize: "clamp(42px, 11vw, 62px)",
-            fontWeight: 700,
-            lineHeight: 1.02,
-            letterSpacing: "-0.02em",
-            color: "#e4e6ed",
-          }}
-        >
-          Kore
-        </h1>
-        <p
-          style={{
-            margin: 0,
-            fontFamily: "var(--font-dm-mono), ui-monospace, SFMono-Regular, Menlo, monospace",
-            fontSize: "clamp(12px, 3.4vw, 14px)",
-            letterSpacing: "0.16em",
-            textTransform: "lowercase",
-            color: "rgba(228,230,237,0.7)",
-          }}
-        >
-          tu hogar organizado
-        </p>
-      </section>
-
-      <section
-        style={{
-          width: "100%",
-          maxWidth: 430,
-          margin: "0 auto",
-          padding: "0 16px 32px",
-          boxSizing: "border-box",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            borderRadius: 18,
-            border: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(22,26,34,0.92)",
-            boxShadow: "0 14px 34px rgba(0,0,0,0.35)",
-            padding: 16,
+            minHeight: "56dvh",
             display: "flex",
             flexDirection: "column",
-            gap: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "32px 20px 18px",
+            textAlign: "center",
           }}
         >
-          <input
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
+          <svg
+            width="40"
+            height="40"
+            viewBox="0 0 160 160"
+            fill="none"
+            aria-hidden
+            style={{ width: "min(55vw, 220px)", height: "auto" }}
+          >
+            <circle cx="62" cy="80" r="44" stroke="#4CC9A0" strokeWidth="1.8" fill="none" />
+            <circle cx="98" cy="80" r="44" stroke="#9B8FE8" strokeWidth="1.8" fill="none" />
+            <circle cx="82" cy="80" r="5" fill="white" opacity="0.95" />
+          </svg>
+          <h1
             style={{
-              width: "100%",
-              minHeight: 46,
-              borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "#121622",
-              color: "#e4e6ed",
-              padding: "11px 12px",
-              fontSize: 16,
+              margin: "20px 0 6px",
               fontFamily: "var(--font-dm-sans), sans-serif",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-
-          <input
-            type="password"
-            autoComplete="current-password"
-            placeholder="Contraseña"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{
-              width: "100%",
-              minHeight: 46,
-              borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "#121622",
-              color: "#e4e6ed",
-              padding: "11px 12px",
-              fontSize: 16,
-              fontFamily: "var(--font-dm-sans), sans-serif",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{
-              width: "100%",
-              minHeight: 46,
-              borderRadius: 10,
-              border: "none",
-              background: "#4CC9A0",
-              color: "#0a1a14",
-              fontFamily: "var(--font-dm-sans), sans-serif",
-              fontSize: 16,
+              fontSize: "clamp(42px, 11vw, 62px)",
               fontWeight: 700,
-              boxShadow: "0 0 18px rgba(76,201,160,0.35)",
-              cursor: submitting ? "default" : "pointer",
-              opacity: submitting ? 0.7 : 1,
+              lineHeight: 1.02,
+              letterSpacing: "-0.02em",
+              color: "#e4e6ed",
             }}
           >
-            {submitting ? "Entrando..." : "Entrar"}
-          </button>
+            Kore
+          </h1>
+          <p
+            style={{
+              margin: 0,
+              fontFamily: "var(--font-dm-mono), ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: "clamp(12px, 3.4vw, 14px)",
+              letterSpacing: "0.16em",
+              textTransform: "lowercase",
+              color: "rgba(228,230,237,0.7)",
+            }}
+          >
+            tu hogar organizado
+          </p>
+        </section>
 
-          {error ? (
-            <p
+        <section
+          style={{
+            width: "100%",
+            maxWidth: 430,
+            margin: "0 auto",
+            padding: "0 16px 32px",
+            boxSizing: "border-box",
+          }}
+        >
+          <form
+            onSubmit={handleSubmit}
+            style={{
+              borderRadius: 18,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(22,26,34,0.92)",
+              boxShadow: "0 14px 34px rgba(0,0,0,0.35)",
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
               style={{
-                margin: "4px 2px 0",
-                fontSize: 13,
-                color: "#fca5a5",
+                width: "100%",
+                minHeight: 46,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "#121622",
+                color: "#e4e6ed",
+                padding: "11px 12px",
+                fontSize: 16,
                 fontFamily: "var(--font-dm-sans), sans-serif",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+
+            <input
+              type="password"
+              autoComplete="current-password"
+              placeholder="Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              style={{
+                width: "100%",
+                minHeight: 46,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "#121622",
+                color: "#e4e6ed",
+                padding: "11px 12px",
+                fontSize: 16,
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+
+            <button
+              type="submit"
+              disabled={submitting}
+              style={{
+                width: "100%",
+                minHeight: 46,
+                borderRadius: 10,
+                border: "none",
+                background: "#4CC9A0",
+                color: "#0a1a14",
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                fontSize: 16,
+                fontWeight: 700,
+                boxShadow: "0 0 18px rgba(76,201,160,0.35)",
+                cursor: submitting ? "default" : "pointer",
+                opacity: submitting ? 0.7 : 1,
               }}
             >
-              {error}
-            </p>
-          ) : null}
-        </form>
-      </section>
+              {submitting ? "Entrando..." : "Entrar"}
+            </button>
+
+            {error ? (
+              <p
+                style={{
+                  margin: "4px 2px 0",
+                  fontSize: 13,
+                  color: "#fca5a5",
+                  fontFamily: "var(--font-dm-sans), sans-serif",
+                }}
+              >
+                {error}
+              </p>
+            ) : null}
+          </form>
+        </section>
+      </div>
     </main>
   );
 }
