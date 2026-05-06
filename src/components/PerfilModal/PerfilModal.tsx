@@ -2,7 +2,9 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
+import { getBrowserClient } from "@/lib/supabase/client";
 
 export type PerfilUsuario = "Ander" | "Leire";
 
@@ -127,6 +129,7 @@ export function PerfilModal({
   onNavigate,
 }: PerfilModalProps) {
   useEscapeKey(onClose);
+  const router = useRouter();
   const [domainRows, setDomainRows] = useState<PerfilDomainRow[]>(domains);
   const [citasRows, setCitasRows] = useState<PerfilCitaRow[]>(saludMember.citas ?? []);
   const [hoverNavKey, setHoverNavKey] = useState<string | null>(null);
@@ -160,6 +163,10 @@ export function PerfilModal({
   };
 
   const initial = usuario === "Ander" ? "A" : "L";
+  const handleSignOut = async () => {
+    await getBrowserClient().auth.signOut();
+    router.push("/login");
+  };
 
   return (
     <div
@@ -223,8 +230,22 @@ export function PerfilModal({
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: TEXT }}>{nombreCompleto(usuario)}</p>
-            <p style={{ margin: "6px 0 0", fontSize: 12, color: MUTED }}>Household OS — Perfil</p>
           </div>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "#ef4444",
+              fontSize: 13,
+              cursor: "pointer",
+              padding: 0,
+              marginRight: 10,
+            }}
+          >
+            Cerrar sesión
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -465,6 +486,7 @@ export function PerfilModal({
               </ul>
             )}
           </div>
+
         </div>
       </div>
     </div>

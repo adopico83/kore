@@ -3,8 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { getBrowserClient } from "@/lib/supabase/client";
 
-export const ANDER_ID = "00000000-0000-0000-0000-000000000001";
-export const LEIRE_ID = "00000000-0000-0000-0000-000000000002";
+export const ANDER_ID = "6204d1a5-bbba-4a01-a9f2-b0742ee0bcd4";
+export const LEIRE_ID = "63c1ffab-4fa1-4953-8d5f-9c5b7e1d5bd4";
 export const PEQUE_ID = "00000000-0000-0000-0000-000000000003";
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];

@@ -24,6 +24,7 @@ export default function LoginPage() {
         email: email.trim(),
         password,
       });
+      console.log("AUTH RESULT:", authError);
 
       if (authError) {
         setError(authError.message || "No se pudo iniciar sesión.");
