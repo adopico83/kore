@@ -100,19 +100,20 @@ export default function LoginPage() {
           zIndex: 1,
         }}
       >
-        <img
-          src="/icon.svg"
-          alt="Logo de Kore"
-          width={220}
-          height={220}
-          style={{
-            width: "min(60vw, 300px)",
-            height: "auto",
-            maxHeight: "48dvh",
-            objectFit: "contain",
-            filter: "drop-shadow(0 14px 34px rgba(0,0,0,0.35))",
-          }}
-        />
+        <svg
+          width="40"
+          height="40"
+          viewBox="0 0 160 160"
+          fill="none"
+          aria-hidden
+          style={{ width: "min(55vw, 220px)", height: "auto" }}
+        >
+          <rect width="160" height="160" rx="36" fill="#0b0d13" />
+          <circle cx="62" cy="80" r="44" stroke="#4CC9A0" strokeWidth="1.8" fill="none" />
+          <circle cx="98" cy="80" r="44" stroke="#9B8FE8" strokeWidth="1.8" fill="none" />
+          <circle cx="82" cy="80" r="5" fill="white" opacity="0.95" />
+          <circle cx="82" cy="80" r="14" fill="white" opacity="0.05" />
+        </svg>
         <h1
           style={{
             margin: "20px 0 6px",
