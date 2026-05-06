@@ -222,6 +222,10 @@ type CorchoMessage = {
   when: string;
 };
 
+type HomeClientProps = {
+  initialCorchoMessages?: CorchoMessage[];
+};
+
 function calendarRowToEvent(row: CalendarEventRow): KoreAgendaEvent {
   return {
     id: row.id,
@@ -346,7 +350,7 @@ function withinAgendaWindow(dateIso: string, now = new Date()): boolean {
   return d >= from && d <= to;
 }
 
-export function HomeClient() {
+export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
   const [showAgent, setShowAgent] = useState(false);
   const [showCorcho, setShowCorcho] = useState(false);
   const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
@@ -363,7 +367,9 @@ export function HomeClient() {
   const [domainsOpen, setDomainsOpen] = useState(true);
   const [domainCardHover, setDomainCardHover] = useState<Record<string, boolean>>({});
   const [domains, setDomains] = useState<DomainCard[]>(DOMAINS);
-  const [corchoMessages, setCorchoMessages] = useState<CorchoMessage[]>([]);
+  const [corchoMessages, setCorchoMessages] = useState<CorchoMessage[]>(
+    initialCorchoMessages.length > 0 ? initialCorchoMessages : [],
+  );
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
   const [healthOpen, setHealthOpen] = useState(false);
@@ -468,11 +474,17 @@ export function HomeClient() {
           when: new Date(r.created_at).toLocaleString("es-ES"),
         };
       });
-      setCorchoMessages(mapped.length > 0 ? mapped : CORCHO_MESSAGES);
+      setCorchoMessages(
+        mapped.length > 0
+          ? mapped
+          : initialCorchoMessages.length > 0
+            ? initialCorchoMessages
+            : CORCHO_MESSAGES,
+      );
     } catch {
-      setCorchoMessages(CORCHO_MESSAGES);
+      setCorchoMessages(initialCorchoMessages.length > 0 ? initialCorchoMessages : CORCHO_MESSAGES);
     }
-  }, []);
+  }, [initialCorchoMessages]);
 
   const handleCloseAgentChat = useCallback(() => {
     setShowAgent(false);

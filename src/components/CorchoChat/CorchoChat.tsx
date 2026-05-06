@@ -13,6 +13,7 @@ import {
 } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
+import { addKoreNote, ANDER_ID, getKoreNotes, LEIRE_ID } from "@/lib/kore-db";
 
 const GREEN = "#4CC9A0";
 const PURPLE = "#9B8FE8";
@@ -20,9 +21,7 @@ const TEXT = "#e4e6ed";
 const BG = "#090b10";
 const CARD = "#161a22";
 
-const LS_CONV = "kore_corcho_conv";
-const LS_MSGS = "kore_corcho_msgs";
-const LS_ACTIVE = "kore_corcho_active";
+const CORCHO_CONV_ID = "kore_corcho_global";
 
 type CorchoRole = "ander" | "leire";
 
@@ -45,51 +44,6 @@ function formatHHMM(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function makeConvId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `corcho_${Date.now()}`;
-}
-
-function readConvs(): CorchoConv[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(LS_CONV);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as CorchoConv[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeConvs(list: CorchoConv[]) {
-  try {
-    localStorage.setItem(LS_CONV, JSON.stringify(list.slice(0, 25)));
-  } catch {
-    /* ignore */
-  }
-}
-
-function readMsgMap(): Record<string, CorchoMessage[]> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(LS_MSGS);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, CorchoMessage[]>;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeMsgMap(map: Record<string, CorchoMessage[]>) {
-  try {
-    localStorage.setItem(LS_MSGS, JSON.stringify(map));
-  } catch {
-    /* ignore */
-  }
 }
 
 async function compressImage(file: File): Promise<string> {
@@ -203,47 +157,32 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
   const mediaRecorderMimeTypeRef = useRef<string>("audio/webm");
   const micGestureHandledRef = useRef(false);
 
-  useEffect(() => {
-    const convs = readConvs();
-    const msgMap = readMsgMap();
-    const saved = localStorage.getItem(LS_ACTIVE)?.trim();
-    const pick = (saved && convs.find((c) => c.id === saved)?.id) ?? convs[0]?.id ?? makeConvId();
-    const initialMsgs = msgMap[pick] ?? [];
-    if (!convs.length) {
-      const seed: CorchoConv = { id: pick, firstPhrase: "Nueva conversación", createdAt: new Date().toISOString(), total: 0 };
-      writeConvs([seed]);
-      setConversaciones([seed]);
-    } else {
-      setConversaciones(convs);
-    }
-    setConversationId(pick);
-    setHistorial(initialMsgs);
-    try {
-      localStorage.setItem(LS_ACTIVE, pick);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const loadMessages = async () => {
+    const rows = await getKoreNotes();
+    const latest = rows.slice(0, 50);
+    const mapped: CorchoMessage[] = [...latest].reverse().map((row) => ({
+      id: row.id,
+      role: row.sender_id === LEIRE_ID ? "leire" : "ander",
+      content: String(row.content ?? "").trim(),
+      at: row.created_at,
+    }));
+    setHistorial(mapped);
+    const first = mapped[0]?.content?.trim() ?? "";
+    const firstPhrase = first.length > 60 ? `${first.slice(0, 60)}…` : first || "Nueva conversación";
+    setConversaciones([
+      {
+        id: CORCHO_CONV_ID,
+        firstPhrase,
+        createdAt: mapped[0]?.at ?? new Date().toISOString(),
+        total: mapped.length,
+      },
+    ]);
+    setConversationId(CORCHO_CONV_ID);
+  };
 
   useEffect(() => {
-    if (!conversationId) return;
-    const msgMap = readMsgMap();
-    msgMap[conversationId] = historial;
-    writeMsgMap(msgMap);
-    try {
-      localStorage.setItem(LS_ACTIVE, conversationId);
-    } catch {
-      /* ignore */
-    }
-    const current = readConvs();
-    const first = historial[0]?.content?.trim() ?? "";
-    const firstPhrase = first.length > 60 ? `${first.slice(0, 60)}…` : first || "Nueva conversación";
-    const next: CorchoConv[] = current.some((c) => c.id === conversationId)
-      ? current.map((c) => (c.id === conversationId ? { ...c, total: historial.length, firstPhrase } : c))
-      : [{ id: conversationId, firstPhrase, createdAt: new Date().toISOString(), total: historial.length }, ...current].slice(0, 25);
-    writeConvs(next);
-    setConversaciones(next);
-  }, [conversationId, historial]);
+    void loadMessages();
+  }, []);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -259,9 +198,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
   });
 
   const nuevaConversacion = () => {
-    const id = makeConvId();
-    setConversationId(id);
-    setHistorial([]);
+    setConversationId(CORCHO_CONV_ID);
     setMensaje("");
     setError("");
     setPanelHistorial(false);
@@ -269,24 +206,13 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
   };
 
   const seleccionarConversacion = (id: string) => {
-    const map = readMsgMap();
     setConversationId(id);
-    setHistorial(map[id] ?? []);
     setPanelHistorial(false);
   };
 
-  const eliminarConversacion = (id: string) => {
-    const nextConvs = readConvs().filter((c) => c.id !== id);
-    writeConvs(nextConvs);
-    const map = readMsgMap();
-    delete map[id];
-    writeMsgMap(map);
-    setConversaciones(nextConvs);
-    if (conversationId === id) {
-      const pick = nextConvs[0]?.id ?? makeConvId();
-      setConversationId(pick);
-      setHistorial(map[pick] ?? []);
-    }
+  const eliminarConversacion = (_id: string) => {
+    // Mantiene el diseño del historial de conversaciones sin borrar notas de Supabase.
+    setPanelHistorial(false);
   };
 
   const handleImagen = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -325,7 +251,16 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
       imagenPreviews: imagenes.length ? imagenes.slice() : undefined,
       at: new Date().toISOString(),
     };
-    setHistorial((prev) => [...prev, msg]);
+    const persistedText = msg.content;
+    await addKoreNote({
+      content: persistedText,
+      sender_id: ANDER_ID,
+      recipient_id: LEIRE_ID,
+      audio_url: null,
+      status: "unread",
+      priority: "low",
+    });
+    await loadMessages();
     emitKoreUpdate(["kore_notes"]);
     setMensaje("");
     setImagenesPendientes([]);
@@ -515,7 +450,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
           </ul>
         ) : historial.length === 0 && !transcribiendo ? (
           <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", padding: 12, color: "rgba(255,255,255,0.75)" }}>
-            Escribe a Leire. Este chat se guarda solo en tu dispositivo.
+            Escribe a Leire.
           </div>
         ) : (
           <>

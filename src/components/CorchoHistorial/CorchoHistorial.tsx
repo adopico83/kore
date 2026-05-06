@@ -1,17 +1,9 @@
 "use client";
 
 import { Play, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { getKoreNotes, LEIRE_ID } from "@/lib/kore-db";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
-
-type CorchoStoredMessage = {
-  id?: string;
-  role?: "ander" | "leire";
-  content?: string;
-  at?: string;
-  audioUrl?: string;
-  audioDataUrl?: string;
-};
 
 type FeedMessage = {
   id: string;
@@ -32,39 +24,6 @@ function formatDateTime(iso: string) {
   };
 }
 
-function readFeedFromStorage(): FeedMessage[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem("kore_corcho_msgs");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Record<string, CorchoStoredMessage[]>;
-    if (!parsed || typeof parsed !== "object") return [];
-    const list: FeedMessage[] = [];
-    for (const msgs of Object.values(parsed)) {
-      if (!Array.isArray(msgs)) continue;
-      for (const m of msgs) {
-        const isAnder = m.role === "ander";
-        const audioUrl =
-          (typeof m.audioUrl === "string" && m.audioUrl) ||
-          (typeof m.audioDataUrl === "string" && m.audioDataUrl) ||
-          (typeof m.content === "string" && m.content.startsWith("data:audio/") ? m.content : undefined);
-        list.push({
-          id: m.id ?? `${m.at ?? "no-date"}-${Math.random()}`,
-          name: isAnder ? "Ander" : "Leire",
-          initial: isAnder ? "A" : "L",
-          avatarBorder: isAnder ? "#10b981" : "#f59e0b",
-          at: m.at ?? "",
-          text: typeof m.content === "string" ? m.content : "",
-          audioUrl: audioUrl || undefined,
-        });
-      }
-    }
-    return list.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
-  } catch {
-    return [];
-  }
-}
-
 export type CorchoHistorialProps = {
   onClose: () => void;
 };
@@ -72,7 +31,34 @@ export type CorchoHistorialProps = {
 export function CorchoHistorial({ onClose }: CorchoHistorialProps) {
   useEscapeKey(onClose);
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const feed = useMemo(() => readFeedFromStorage(), []);
+  const [feed, setFeed] = useState<FeedMessage[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await getKoreNotes();
+        if (cancelled) return;
+        const mapped: FeedMessage[] = rows.map((row) => {
+          const isAnder = row.sender_id !== LEIRE_ID;
+          return {
+            id: row.id,
+            name: isAnder ? "Ander" : "Leire",
+            initial: isAnder ? "A" : "L",
+            avatarBorder: isAnder ? "#10b981" : "#f59e0b",
+            at: row.created_at,
+            text: String(row.content ?? ""),
+          };
+        });
+        setFeed(mapped);
+      } catch {
+        if (!cancelled) setFeed([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div
