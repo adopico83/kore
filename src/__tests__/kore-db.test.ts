@@ -36,7 +36,7 @@ describe("kore-db critical queries", () => {
     const client = { from: vi.fn(() => builder) };
     mockGetBrowserClient.mockReturnValue(client);
 
-    const rows = await getProfiles();
+    const rows = await getProfiles(FAMILY_ID);
 
     expect(client.from).toHaveBeenCalledWith("profiles");
     expect(builder.eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
@@ -50,7 +50,7 @@ describe("kore-db critical queries", () => {
     });
     mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => builder) });
 
-    const rows = await getProfiles();
+    const rows = await getProfiles(FAMILY_ID);
 
     expect(rows).toEqual([]);
   });
@@ -62,7 +62,7 @@ describe("kore-db critical queries", () => {
     });
     mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => builder) });
 
-    const rows = await getDomains();
+    const rows = await getDomains(FAMILY_ID);
 
     expect(builder.eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
     expect(rows).toEqual([]);
@@ -75,7 +75,7 @@ describe("kore-db critical queries", () => {
     });
     mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => builder) });
 
-    const rows = await getDomains();
+    const rows = await getDomains(FAMILY_ID);
 
     expect(builder.eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
     expect(rows).toEqual([{ id: "d1", name: "Compras" }]);
@@ -88,7 +88,7 @@ describe("kore-db critical queries", () => {
     const from = vi.fn(() => ({ insert }));
     mockGetBrowserClient.mockReturnValue({ from });
 
-    const row = await addKoreNote({
+    const row = await addKoreNote(FAMILY_ID, {
       sender_id: "u1",
       recipient_id: "u2",
       content: "hola",
@@ -116,7 +116,7 @@ describe("kore-db critical queries", () => {
     mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => ({ insert })) });
 
     await expect(
-      addKoreNote({
+      addKoreNote(FAMILY_ID, {
         sender_id: "u1",
         recipient_id: "u2",
         content: "hola",
