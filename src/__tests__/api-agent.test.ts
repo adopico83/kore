@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const mockGetScopedFamilyId = vi.fn();
+
 vi.mock("@/lib/family-context", () => ({
-  getScopedFamilyId: vi.fn().mockResolvedValue("8378283a-cfc0-46ec-90c0-07e45c885aee"),
+  getScopedFamilyId: mockGetScopedFamilyId,
 }));
 
 const mockGetAgentMemory = vi.fn();
@@ -36,6 +38,17 @@ describe("POST /api/agent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.OPENAI_API_KEY = "test-key";
+    mockGetScopedFamilyId.mockResolvedValue("8378283a-cfc0-46ec-90c0-07e45c885aee");
+  });
+
+  it("devuelve 401 cuando getScopedFamilyId es null", async () => {
+    mockGetScopedFamilyId.mockResolvedValueOnce(null);
+    const { POST } = await import("@/app/api/agent/route");
+    const request = { json: vi.fn(async () => ({ mensaje: "hola" })) } as never;
+    const res = await POST(request);
+    const body = await res.json();
+    expect(res.status).toBe(401);
+    expect(body).toEqual({ error: "No tienes una familia asignada" });
   });
 
   it("devuelve 400 cuando faltan mensaje e imagenes", async () => {
@@ -92,5 +105,7 @@ describe("POST /api/agent", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ reply: "Todo OK", respuesta: "Todo OK" });
+    expect(mockGetScopedFamilyId).toHaveBeenCalled();
+    expect(mockGetAgentMemory).toHaveBeenCalledWith("8378283a-cfc0-46ec-90c0-07e45c885aee");
   });
 });
