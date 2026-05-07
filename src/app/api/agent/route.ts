@@ -3,6 +3,7 @@ import OpenAI from "openai";
 
 import { applyGuardrails, type PlannedTool } from "@/lib/agent/guardrails";
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
+import { getScopedFamilyId } from "@/lib/family-context";
 import { getAgentMemory } from "@/lib/kore-db";
 
 const openai = new OpenAI({
@@ -169,6 +170,11 @@ No redactes respuesta al usuario.
 
 export async function POST(request: NextRequest) {
   try {
+    const familyId = await getScopedFamilyId();
+    if (!familyId) {
+      return new Response(JSON.stringify({ error: "No tienes una familia asignada" }), { status: 401 });
+    }
+
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "Falta OPENAI_API_KEY en el entorno del servidor" },

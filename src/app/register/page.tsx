@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
 
-/** Fondo animado: tres ondas sinusoidales finas (canvas nativo). */
 function LoginSineCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -92,8 +91,17 @@ function LoginSineCanvas() {
   );
 }
 
-export default function LoginPage() {
+function generateInviteCode(): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const part = (len: number) =>
+    Array.from({ length: len }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+  return `KORE-${part(4)}-${part(2)}`;
+}
+
+export default function RegisterPage() {
   const router = useRouter();
+  const [familyName, setFamilyName] = useState("");
+  const [ownerName, setOwnerName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -108,13 +116,47 @@ export default function LoginPage() {
 
     try {
       const supabase = getBrowserClient();
-      const { error: authError } = await supabase.auth.signInWithPassword({
+
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
       });
-
       if (authError) {
-        setError(authError.message || "No se pudo iniciar sesión.");
+        setError(authError.message || "No se pudo crear la cuenta.");
+        return;
+      }
+
+      const user = authData.user;
+      if (!user) {
+        setError("No se pudo obtener el usuario tras el registro.");
+        return;
+      }
+
+      const inviteCode = generateInviteCode();
+      const { data: family, error: familyError } = await supabase
+        .from("families")
+        .insert({
+          name: familyName.trim(),
+          owner_id: user.id,
+          invite_code: inviteCode,
+        })
+        .select("id")
+        .single();
+
+      if (familyError || !family?.id) {
+        setError(familyError?.message || "No se pudo crear la familia.");
+        return;
+      }
+
+      const { error: profileError } = await supabase.from("profiles").insert({
+        id: user.id,
+        name: ownerName.trim(),
+        family_id: family.id,
+        role: "owner",
+      });
+
+      if (profileError) {
+        setError(profileError.message || "No se pudo crear el perfil inicial.");
         return;
       }
 
@@ -184,7 +226,7 @@ export default function LoginPage() {
               color: "#e4e6ed",
             }}
           >
-            Kore
+            Crear familia
           </h1>
           <p
             style={{
@@ -196,7 +238,7 @@ export default function LoginPage() {
               color: "rgba(228,230,237,0.7)",
             }}
           >
-            tu hogar organizado
+            alta inicial de hogar
           </p>
         </section>
 
@@ -223,6 +265,48 @@ export default function LoginPage() {
             }}
           >
             <input
+              type="text"
+              placeholder="Nombre de la familia"
+              value={familyName}
+              onChange={(e) => setFamilyName(e.target.value)}
+              required
+              style={{
+                width: "100%",
+                minHeight: 46,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "#121622",
+                color: "#e4e6ed",
+                padding: "11px 12px",
+                fontSize: 16,
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+
+            <input
+              type="text"
+              placeholder="Tu nombre"
+              value={ownerName}
+              onChange={(e) => setOwnerName(e.target.value)}
+              required
+              style={{
+                width: "100%",
+                minHeight: 46,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "#121622",
+                color: "#e4e6ed",
+                padding: "11px 12px",
+                fontSize: 16,
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+
+            <input
               type="email"
               inputMode="email"
               autoComplete="email"
@@ -247,7 +331,7 @@ export default function LoginPage() {
 
             <input
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
               placeholder="Contraseña"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -285,7 +369,7 @@ export default function LoginPage() {
                 opacity: submitting ? 0.7 : 1,
               }}
             >
-              {submitting ? "Entrando..." : "Entrar"}
+              {submitting ? "Creando..." : "Crear familia"}
             </button>
 
             {error ? (
@@ -300,20 +384,6 @@ export default function LoginPage() {
                 {error}
               </p>
             ) : null}
-            <p
-              style={{
-                margin: "8px 2px 0",
-                fontSize: 13,
-                color: "rgba(228,230,237,0.75)",
-                fontFamily: "var(--font-dm-sans), sans-serif",
-                textAlign: "center",
-              }}
-            >
-              ¿Primera vez?{" "}
-              <a href="/register" style={{ color: "#4CC9A0", textDecoration: "none" }}>
-                Crear familia
-              </a>
-            </p>
           </form>
         </section>
       </div>

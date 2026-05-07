@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FAMILY_ID, addKoreNote, getDomains, getProfiles } from "@/lib/kore-db";
 
+vi.mock("@/lib/family-context", () => ({
+  getScopedFamilyId: vi.fn().mockResolvedValue("8378283a-cfc0-46ec-90c0-07e45c885aee"),
+}));
+
 const { mockGetBrowserClient } = vi.hoisted(() => ({
   mockGetBrowserClient: vi.fn(),
 }));

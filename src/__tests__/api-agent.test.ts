@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/family-context", () => ({
+  getScopedFamilyId: vi.fn().mockResolvedValue("8378283a-cfc0-46ec-90c0-07e45c885aee"),
+}));
+
 const mockGetAgentMemory = vi.fn();
 const mockBuildSystemPrompt = vi.fn(() => "system");
 const mockExecuteTool = vi.fn();

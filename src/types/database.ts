@@ -698,6 +698,7 @@ export type Database = {
           family_id: string | null
           id: string
           name: string
+          role: string | null
           sleep_hours: number | null
           stress_level: number | null
           updated_at: string | null
@@ -706,6 +707,7 @@ export type Database = {
           family_id?: string | null
           id: string
           name: string
+          role?: string | null
           sleep_hours?: number | null
           stress_level?: number | null
           updated_at?: string | null
@@ -714,6 +716,7 @@ export type Database = {
           family_id?: string | null
           id?: string
           name?: string
+          role?: string | null
           sleep_hours?: number | null
           stress_level?: number | null
           updated_at?: string | null

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/types/database";
+import { getScopedFamilyId } from "@/lib/family-context";
 import { getBrowserClient } from "@/lib/supabase/client";
 
 export const ANDER_ID = "6204d1a5-bbba-4a01-a9f2-b0742ee0bcd4";
@@ -207,11 +208,18 @@ function throwDb(context: string, error: { message: string } | null) {
   if (error) throw new Error(`${context}: ${error.message}`);
 }
 
+async function requireFamilyId(): Promise<string> {
+  const familyId = await getScopedFamilyId();
+  if (!familyId) throw new Error("No family context");
+  return familyId;
+}
+
 export async function getProfiles(): Promise<Profile[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("profiles")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("name", { ascending: true });
   if (error) return [];
   return data ?? [];
@@ -227,10 +235,11 @@ export async function updateStressLevel(userId: string, level: number): Promise<
 }
 
 export async function getCalendarEvents(): Promise<CalendarEventRow[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("calendar_events")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("date", { ascending: true })
     .order("time", { ascending: true });
   if (error) return [];
@@ -238,8 +247,9 @@ export async function getCalendarEvents(): Promise<CalendarEventRow[]> {
 }
 
 export async function addCalendarEvent(data: CalendarEventInsert): Promise<CalendarEventRow> {
+  const familyId = await requireFamilyId();
   const row = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     title: data.title,
     date: data.date,
     time: data.time,
@@ -268,10 +278,11 @@ export async function updateCalendarEvent(
 export type HealthRecordInsert = Database["public"]["Tables"]["health_records"]["Insert"];
 
 export async function getHealthRecords(patientId?: string): Promise<HealthRecord[]> {
+  const familyId = await requireFamilyId();
   let query = db()
     .from("health_records")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (patientId) query = query.eq("patient_id", patientId);
   const { data, error } = await query;
@@ -280,9 +291,10 @@ export async function getHealthRecords(patientId?: string): Promise<HealthRecord
 }
 
 export async function addHealthRecord(data: HealthRecordInsert): Promise<HealthRecord> {
+  const familyId = await requireFamilyId();
   const { data: created, error } = await db()
     .from("health_records")
-    .insert({ ...data, family_id: FAMILY_ID })
+    .insert({ ...data, family_id: familyId })
     .select("*")
     .single();
   throwDb("addHealthRecord", error);
@@ -305,19 +317,21 @@ export async function deleteHealthRecord(id: string): Promise<void> {
 export type ExpenseInsert = Database["public"]["Tables"]["expenses"]["Insert"];
 
 export async function getExpenses(): Promise<Expense[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("expenses")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (error) return [];
   return data ?? [];
 }
 
 export async function addExpense(data: ExpenseInsert): Promise<Expense> {
+  const familyId = await requireFamilyId();
   const { data: created, error } = await db()
     .from("expenses")
-    .insert({ ...data, family_id: FAMILY_ID })
+    .insert({ ...data, family_id: familyId })
     .select("*")
     .single();
   throwDb("addExpense", error);
@@ -332,10 +346,11 @@ export async function deleteExpense(id: string): Promise<void> {
 export type KoreNoteInsert = Database["public"]["Tables"]["kore_notes"]["Insert"];
 
 export async function getKoreNotes(recipientId?: string): Promise<KoreNote[]> {
+  const familyId = await requireFamilyId();
   let query = db()
     .from("kore_notes")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (recipientId) query = query.eq("recipient_id", recipientId);
   const { data, error } = await query;
@@ -344,9 +359,10 @@ export async function getKoreNotes(recipientId?: string): Promise<KoreNote[]> {
 }
 
 export async function addKoreNote(data: KoreNoteInsert): Promise<KoreNote> {
+  const familyId = await requireFamilyId();
   const { data: created, error } = await db()
     .from("kore_notes")
-    .insert({ ...data, family_id: FAMILY_ID })
+    .insert({ ...data, family_id: familyId })
     .select("*")
     .single();
   throwDb("addKoreNote", error);
@@ -359,10 +375,11 @@ export async function markNoteAsRead(id: string): Promise<void> {
 }
 
 export async function getDomains(): Promise<Domain[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("domains")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("name", { ascending: true });
   if (error) return [];
   return data ?? [];
@@ -374,8 +391,9 @@ export async function updateDomain(id: string, data: Partial<Domain>): Promise<v
 }
 
 export async function addDomainHistory(domainId: string, text: string, createdBy: string): Promise<void> {
+  const familyId = await requireFamilyId();
   const { error } = await db().from("domain_history").insert({
-    family_id: FAMILY_ID,
+    family_id: familyId,
     domain_id: domainId,
     text,
     created_by: createdBy,
@@ -384,10 +402,11 @@ export async function addDomainHistory(domainId: string, text: string, createdBy
 }
 
 export async function getDomainHistory(domainId: string): Promise<DomainHistoryRow[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("domain_history")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .eq("domain_id", domainId)
     .order("created_at", { ascending: false });
   if (error) return [];
@@ -397,10 +416,11 @@ export async function getDomainHistory(domainId: string): Promise<DomainHistoryR
 export type DailyMetricsUpsert = Database["public"]["Tables"]["daily_metrics"]["Insert"];
 
 export async function getDailyMetrics(date: string): Promise<DailyMetrics | null> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("daily_metrics")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .eq("date", date)
     .maybeSingle();
   if (error) return null;
@@ -408,17 +428,19 @@ export async function getDailyMetrics(date: string): Promise<DailyMetrics | null
 }
 
 export async function upsertDailyMetrics(data: DailyMetricsUpsert): Promise<void> {
+  const familyId = await requireFamilyId();
   const { error } = await db()
     .from("daily_metrics")
-    .upsert({ ...data, family_id: FAMILY_ID }, { onConflict: "date" });
+    .upsert({ ...data, family_id: familyId }, { onConflict: "date" });
   throwDb("upsertDailyMetrics", error);
 }
 
 export async function getAgentMemory(category?: string): Promise<AgentMemoryRow[]> {
+  const familyId = await requireFamilyId();
   let query = db()
     .from("agent_memory")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("category", { ascending: true })
     .order("key", { ascending: true });
   if (category) query = query.eq("category", category);
@@ -428,11 +450,12 @@ export async function getAgentMemory(category?: string): Promise<AgentMemoryRow[
 }
 
 export async function upsertAgentMemory(key: string, value: string, category: string): Promise<void> {
+  const familyId = await requireFamilyId();
   const now = new Date().toISOString();
   const { data: existing, error: selErr } = await db()
     .from("agent_memory")
     .select("id")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .eq("key", key)
     .maybeSingle();
   throwDb("upsertAgentMemory(select)", selErr);
@@ -445,7 +468,7 @@ export async function upsertAgentMemory(key: string, value: string, category: st
     return;
   }
   const { error } = await db().from("agent_memory").insert({
-    family_id: FAMILY_ID,
+    family_id: familyId,
     key,
     value,
     category,
@@ -456,10 +479,11 @@ export async function upsertAgentMemory(key: string, value: string, category: st
 }
 
 export async function getShoppingItems(): Promise<ShoppingItemRow[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("shopping_items")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (error) return [];
   return data ?? [];
@@ -472,8 +496,9 @@ export async function addShoppingItem(data: {
   priority?: string;
   created_by?: string;
 }): Promise<ShoppingItemRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     name: data.name,
     quantity: data.quantity ?? null,
     category: data.category ?? null,
@@ -525,10 +550,11 @@ export async function clearCompletedItems(): Promise<void> {
 }
 
 export async function getCleaningTasks(): Promise<CleaningTaskRow[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("cleaning_tasks")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (error) return [];
   return data ?? [];
@@ -540,8 +566,9 @@ export async function addCleaningTask(data: {
   frequency?: string;
   assigned_to?: string;
 }): Promise<CleaningTaskRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     zone: data.zone,
     task: data.task,
     frequency: data.frequency ?? "semanal",
@@ -570,10 +597,11 @@ export async function completeCleaningTask(id: string): Promise<void> {
 }
 
 export async function getPendingCleaningTasks(): Promise<CleaningTaskRow[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("cleaning_tasks")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .eq("completed", false)
     .order("created_at", { ascending: false });
   if (error) return [];
@@ -589,11 +617,12 @@ function currentWeekStartIso(now = new Date()): string {
 }
 
 export async function getWeeklyMenu(week_start?: string): Promise<MenuItemRow[]> {
+  const familyId = await requireFamilyId();
   const targetWeek = (week_start ?? currentWeekStartIso()).slice(0, 10);
   const { data, error } = await db()
     .from("menu_items")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .eq("week_start", targetWeek)
     .order("day", { ascending: true })
     .order("meal", { ascending: true });
@@ -607,8 +636,9 @@ export async function addMenuItem(data: {
   dish: string;
   week_start?: string;
 }): Promise<MenuItemRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     day: data.day,
     meal: data.meal,
     dish: data.dish,
@@ -626,10 +656,11 @@ export async function clearDayMenu(day: string, week_start?: string): Promise<vo
 }
 
 export async function getSchoolEvents(): Promise<SchoolEventRow[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("school_events")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("date", { ascending: true })
     .order("time", { ascending: true });
   if (error) return [];
@@ -643,8 +674,9 @@ export async function addSchoolEvent(data: {
   type?: string;
   description?: string;
 }): Promise<SchoolEventRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     title: data.title,
     date: data.date.slice(0, 10),
     time: data.time ?? null,
@@ -668,18 +700,20 @@ export async function addSchoolEvent(data: {
 }
 
 export async function getSchoolMaterials(): Promise<SchoolMaterialRow[]> {
+  const familyId = await requireFamilyId();
   const { data, error } = await db()
     .from("school_materials")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (error) return [];
   return data ?? [];
 }
 
 export async function addSchoolMaterial(data: { item: string; urgency?: string }): Promise<SchoolMaterialRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     item: data.item,
     urgency: data.urgency ?? "media",
     completed: false,
@@ -701,10 +735,11 @@ export async function deleteSchoolItem(id: string, type: "event" | "material"): 
 }
 
 export async function getLeisureActivities(person?: string): Promise<LeisureActivityRow[]> {
+  const familyId = await requireFamilyId();
   let query = db()
     .from("leisure_activities")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (person) query = query.eq("person", person);
   const { data, error } = await query;
@@ -718,8 +753,9 @@ export async function addLeisureActivity(data: {
   date?: string;
   duration_minutes?: number;
 }): Promise<LeisureActivityRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     person: data.person,
     activity: data.activity,
     date: data.date ? data.date.slice(0, 10) : null,
@@ -735,8 +771,9 @@ export async function logPersonalTime(
   description: string,
   minutes: number,
 ): Promise<LeisureActivityRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     person,
     activity: `tiempo_personal: ${description}`.slice(0, 255),
     date: null,
@@ -748,8 +785,9 @@ export async function logPersonalTime(
 }
 
 export async function logWakeup(data: { person: string; reason?: string }): Promise<SleepLogRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     person: data.person,
     type: "wakeup",
     reason: data.reason ?? null,
@@ -772,8 +810,9 @@ export async function logWakeup(data: { person: string; reason?: string }): Prom
 }
 
 export async function logSleepHours(person: string, hours: number): Promise<SleepLogRow> {
+  const familyId = await requireFamilyId();
   const payload = {
-    family_id: FAMILY_ID,
+    family_id: familyId,
     person,
     type: "sleep_hours",
     reason: null,
@@ -785,11 +824,12 @@ export async function logSleepHours(person: string, hours: number): Promise<Slee
 }
 
 export async function getSleepLogs(days = 7): Promise<SleepLogRow[]> {
+  const familyId = await requireFamilyId();
   const cutoff = new Date(Date.now() - Math.max(1, days) * 24 * 3600 * 1000).toISOString();
   const { data, error } = await db()
     .from("sleep_logs")
     .select("*")
-    .eq("family_id", FAMILY_ID)
+    .eq("family_id", familyId)
     .gte("logged_at", cutoff)
     .order("logged_at", { ascending: false });
   if (error) return [];
