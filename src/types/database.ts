@@ -277,9 +277,11 @@ export type Database = {
           family_id: string | null
           grace_hours: number | null
           id: string
+          is_active: boolean | null
           last_transfer_at: string | null
           name: string
           owner_id: string | null
+          priority_level: number | null
           weight: number
         }
         Insert: {
@@ -287,9 +289,11 @@ export type Database = {
           family_id?: string | null
           grace_hours?: number | null
           id?: string
+          is_active?: boolean | null
           last_transfer_at?: string | null
           name: string
           owner_id?: string | null
+          priority_level?: number | null
           weight: number
         }
         Update: {
@@ -297,9 +301,11 @@ export type Database = {
           family_id?: string | null
           grace_hours?: number | null
           id?: string
+          is_active?: boolean | null
           last_transfer_at?: string | null
           name?: string
           owner_id?: string | null
+          priority_level?: number | null
           weight?: number
         }
         Relationships: [
@@ -430,6 +436,7 @@ export type Database = {
           invite_expires_at: string | null
           metadata: Json | null
           name: string
+          onboarding_step: string | null
           owner_id: string | null
           subscription_plan: string | null
         }
@@ -440,6 +447,7 @@ export type Database = {
           invite_expires_at?: string | null
           metadata?: Json | null
           name: string
+          onboarding_step?: string | null
           owner_id?: string | null
           subscription_plan?: string | null
         }
@@ -450,6 +458,7 @@ export type Database = {
           invite_expires_at?: string | null
           metadata?: Json | null
           name?: string
+          onboarding_step?: string | null
           owner_id?: string | null
           subscription_plan?: string | null
         }

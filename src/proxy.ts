@@ -26,16 +26,16 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getSession();
 
   const { pathname } = request.nextUrl;
-  const isPublic = pathname === "/login" || pathname === "/register";
+  const isAuthPage = pathname === "/login" || pathname === "/register";
 
-  if (!session && !isPublic) {
+  if (!session && !isAuthPage) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (session && isPublic) {
+  if (session && isAuthPage) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/";
     redirectUrl.search = "";

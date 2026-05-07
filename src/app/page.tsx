@@ -1,7 +1,9 @@
 export const dynamic = "force-dynamic";
 
+import { redirect } from "next/navigation";
 import { HomeClient } from "./HomeClient";
 import { getScopedFamilyId } from "@/lib/family-context";
+import { createClient } from "@/lib/supabase/server";
 import {
   getProfiles,
   getDomains,
@@ -16,6 +18,38 @@ import {
 } from "@/lib/kore-db";
 
 export default async function Home() {
+  console.log("PAGE.TSX EJECUTÁNDOSE");
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  console.log("AUTH USER EN PAGE:", user?.id ?? "NULL");
+
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("family_id")
+      .eq("id", user.id)
+      .single();
+
+    if (profile?.family_id) {
+      const { data: family } = await supabase
+        .from("families")
+        .select("onboarding_step")
+        .eq("id", profile.family_id)
+        .single();
+
+      console.log("USER:", user?.id);
+      console.log("PROFILE:", profile);
+      console.log("FAMILY:", family);
+      console.log("ONBOARDING STEP:", family?.onboarding_step);
+
+      if (family?.onboarding_step === "pending") {
+        redirect("/onboarding");
+      }
+    }
+  }
+
   const familyId = await getScopedFamilyId();
 
   if (!familyId) {
@@ -37,7 +71,7 @@ export default async function Home() {
 
   const [
     initialProfiles,
-    initialDomains,
+    initialDomainsAll,
     initialCalendarEvents,
     initialExpenses,
     initialHealthRecords,
@@ -59,6 +93,7 @@ export default async function Home() {
     getSleepLogs(familyId, 7),
   ]);
 
+  const initialDomains = initialDomainsAll.filter((domain) => domain.is_active === true);
   const initialKoreNotes = allKoreNotes.slice(0, 3);
 
   return (

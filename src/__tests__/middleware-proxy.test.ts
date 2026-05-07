@@ -8,10 +8,29 @@ vi.mock("@supabase/ssr", () => ({
 }));
 
 function withSession(session: unknown) {
+  const state = { table: "" };
   mockCreateServerClient.mockReturnValue({
     auth: {
       getSession: vi.fn(async () => ({ data: { session } })),
     },
+    from: vi.fn((table: string) => {
+      state.table = table;
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => {
+              if (state.table === "profiles") {
+                return { data: { family_id: "family-1" } };
+              }
+              if (state.table === "families") {
+                return { data: { onboarding_step: "completed" } };
+              }
+              return { data: null };
+            }),
+          })),
+        })),
+      };
+    }),
   });
 }
 

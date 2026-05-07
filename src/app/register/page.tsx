@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
+import { registerFamilyAction } from "@/lib/actions/register";
 
 function LoginSineCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -91,13 +92,6 @@ function LoginSineCanvas() {
   );
 }
 
-function generateInviteCode(): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const part = (len: number) =>
-    Array.from({ length: len }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-  return `KORE-${part(4)}-${part(2)}`;
-}
-
 export default function RegisterPage() {
   const router = useRouter();
   const [familyName, setFamilyName] = useState("");
@@ -116,47 +110,23 @@ export default function RegisterPage() {
 
     try {
       const supabase = getBrowserClient();
+      const registerResult = await registerFamilyAction(
+        email.trim(),
+        password,
+        familyName.trim(),
+        ownerName.trim(),
+      );
+      if ("error" in registerResult) {
+        setError(registerResult.error);
+        return;
+      }
 
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { error: signInError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
-      if (authError) {
-        setError(authError.message || "No se pudo crear la cuenta.");
-        return;
-      }
-
-      const user = authData.user;
-      if (!user) {
-        setError("No se pudo obtener el usuario tras el registro.");
-        return;
-      }
-
-      const inviteCode = generateInviteCode();
-      const { data: family, error: familyError } = await supabase
-        .from("families")
-        .insert({
-          name: familyName.trim(),
-          owner_id: user.id,
-          invite_code: inviteCode,
-        })
-        .select("id")
-        .single();
-
-      if (familyError || !family?.id) {
-        setError(familyError?.message || "No se pudo crear la familia.");
-        return;
-      }
-
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: user.id,
-        name: ownerName.trim(),
-        family_id: family.id,
-        role: "owner",
-      });
-
-      if (profileError) {
-        setError(profileError.message || "No se pudo crear el perfil inicial.");
+      if (signInError) {
+        setError(signInError.message || "Cuenta creada, pero no se pudo iniciar sesión automáticamente.");
         return;
       }
 

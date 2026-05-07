@@ -296,21 +296,8 @@ function mergedDomainCard(row: KoreDomainRow): DomainCard {
 }
 
 function mergeDomainsWithFallback(primary: DomainCard[], fallback: DomainCard[]): DomainCard[] {
-  const normalizeDomainKey = (name: string) => name.trim().toLowerCase();
-  const byName = new Map(primary.map((d) => [normalizeDomainKey(d.name), d]));
-  const merged = fallback.map((base) => {
-    const fromDb = byName.get(normalizeDomainKey(base.name));
-    if (!fromDb) return base;
-    return {
-      ...base,
-      ...fromDb,
-      emoji: fromDb.emoji || base.emoji,
-      line: fromDb.line || base.line,
-      state: fromDb.state || base.state,
-      notes: fromDb.notes && fromDb.notes.length > 0 ? fromDb.notes : base.notes,
-    };
-  });
-  return merged;
+  if (primary.length > 0) return primary;
+  return fallback;
 }
 
 function enrichComprasDomainFromShoppingItems(domain: DomainCard, items: Awaited<ReturnType<typeof getShoppingItems>>): DomainCard {
@@ -410,7 +397,8 @@ export function HomeClient({
   const [domainsOpen, setDomainsOpen] = useState(true);
   const [domainCardHover, setDomainCardHover] = useState<Record<string, boolean>>({});
   const [domains, setDomains] = useState<DomainCard[]>(() => {
-    const mapped = initialDomains.map((row) =>
+    const activeInitialDomains = initialDomains.filter((row) => row.is_active === true);
+    const mapped = activeInitialDomains.map((row) =>
       enrichSuenoDomain(
         enrichLimpiezaDomain(
           enrichMenuDomain(enrichComprasDomainFromShoppingItems(mergedDomainCard(row), initialShoppingItems), initialWeeklyMenu),
@@ -473,7 +461,8 @@ export function HomeClient({
         getWeeklyMenu(),
         getSleepLogs(7),
       ]);
-      const mapped = rows.map((row) =>
+      const activeRows = rows.filter((row) => row.is_active === true);
+      const mapped = activeRows.map((row) =>
         enrichSuenoDomain(
           enrichLimpiezaDomain(
             enrichMenuDomain(enrichComprasDomainFromShoppingItems(mergedDomainCard(row), shoppingItems), weeklyMenu),
