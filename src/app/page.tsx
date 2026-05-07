@@ -1,31 +1,78 @@
 export const dynamic = "force-dynamic";
 
 import { HomeClient } from "./HomeClient";
-import { LEIRE_ID } from "@/lib/kore-db";
-import { createClient } from "@/lib/supabase/server";
-
-type CorchoPreviewMessage = {
-  who: "Ander" | "Leire";
-  avatar: "A" | "L";
-  ownerColor: string;
-  text: string;
-  when: string;
-};
+import { getScopedFamilyId } from "@/lib/family-context";
+import {
+  getProfiles,
+  getDomains,
+  getCalendarEvents,
+  getExpenses,
+  getHealthRecords,
+  getKoreNotes,
+  getShoppingItems,
+  getPendingCleaningTasks,
+  getWeeklyMenu,
+  getSleepLogs,
+} from "@/lib/kore-db";
 
 export default async function Home() {
-  const supabase = await createClient();
-  const { data } = await supabase.from("kore_notes").select("*").order("created_at", { ascending: false }).limit(3);
+  const familyId = await getScopedFamilyId();
 
-  const initialCorchoMessages: CorchoPreviewMessage[] = (data ?? []).map((row) => {
-    const who = row.sender_id === LEIRE_ID ? "Leire" : "Ander";
-    return {
-      who,
-      avatar: who === "Leire" ? "L" : "A",
-      ownerColor: who === "Leire" ? "#f59e0b" : "#10b981",
-      text: row.content ?? "(nota sin texto)",
-      when: new Date(row.created_at ?? "").toLocaleString("es-ES"),
-    };
-  });
+  if (!familyId) {
+    return (
+      <HomeClient
+        initialProfiles={[]}
+        initialDomains={[]}
+        initialCalendarEvents={[]}
+        initialExpenses={[]}
+        initialHealthRecords={[]}
+        initialKoreNotes={[]}
+        initialShoppingItems={[]}
+        initialPendingCleaningTasks={[]}
+        initialWeeklyMenu={[]}
+        initialSleepLogs={[]}
+      />
+    );
+  }
 
-  return <HomeClient initialCorchoMessages={initialCorchoMessages} />;
+  const [
+    initialProfiles,
+    initialDomains,
+    initialCalendarEvents,
+    initialExpenses,
+    initialHealthRecords,
+    allKoreNotes,
+    initialShoppingItems,
+    initialPendingCleaningTasks,
+    initialWeeklyMenu,
+    initialSleepLogs,
+  ] = await Promise.all([
+    getProfiles(familyId),
+    getDomains(familyId),
+    getCalendarEvents(familyId),
+    getExpenses(familyId),
+    getHealthRecords(familyId),
+    getKoreNotes(familyId),
+    getShoppingItems(familyId),
+    getPendingCleaningTasks(familyId),
+    getWeeklyMenu(familyId),
+    getSleepLogs(familyId, 7),
+  ]);
+
+  const initialKoreNotes = allKoreNotes.slice(0, 3);
+
+  return (
+    <HomeClient
+      initialProfiles={initialProfiles}
+      initialDomains={initialDomains}
+      initialCalendarEvents={initialCalendarEvents}
+      initialExpenses={initialExpenses}
+      initialHealthRecords={initialHealthRecords}
+      initialKoreNotes={initialKoreNotes}
+      initialShoppingItems={initialShoppingItems}
+      initialPendingCleaningTasks={initialPendingCleaningTasks}
+      initialWeeklyMenu={initialWeeklyMenu}
+      initialSleepLogs={initialSleepLogs}
+    />
+  );
 }

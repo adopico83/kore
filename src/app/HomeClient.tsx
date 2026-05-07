@@ -24,6 +24,13 @@ import {
   type CalendarEventRow,
   type Domain as KoreDomainRow,
   type Expense,
+  type Profile,
+  type HealthRecord,
+  type KoreNote,
+  type ShoppingItemRow,
+  type CleaningTaskRow,
+  type MenuItemRow,
+  type SleepLogRow,
 } from "@/lib/kore-db";
 import { getProfiles, updateStressLevel } from "@/lib/actions/profiles";
 import {
@@ -221,8 +228,30 @@ type CorchoMessage = {
 };
 
 type HomeClientProps = {
-  initialCorchoMessages?: CorchoMessage[];
+  initialProfiles: Profile[];
+  initialDomains: KoreDomainRow[];
+  initialCalendarEvents: CalendarEventRow[];
+  initialExpenses: Expense[];
+  initialHealthRecords: HealthRecord[];
+  initialKoreNotes: KoreNote[];
+  initialShoppingItems: ShoppingItemRow[];
+  initialPendingCleaningTasks: CleaningTaskRow[];
+  initialWeeklyMenu: MenuItemRow[];
+  initialSleepLogs: SleepLogRow[];
 };
+
+function mapKoreNotesToCorchoMessages(rows: KoreNote[]): CorchoMessage[] {
+  return rows.slice(0, 3).map((r) => {
+    const who = r.sender_id === LEIRE_ID ? "Leire" : "Ander";
+    return {
+      who,
+      avatar: who === "Leire" ? "L" : "A",
+      ownerColor: who === "Leire" ? "#f59e0b" : "#10b981",
+      text: r.content ?? "(nota sin texto)",
+      when: new Date(r.created_at ?? "").toLocaleString("es-ES"),
+    };
+  });
+}
 
 function calendarRowToEvent(row: CalendarEventRow): KoreAgendaEvent {
   return {
@@ -348,7 +377,18 @@ function withinAgendaWindow(dateIso: string, now = new Date()): boolean {
   return d >= from && d <= to;
 }
 
-export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
+export function HomeClient({
+  initialProfiles,
+  initialDomains,
+  initialCalendarEvents,
+  initialExpenses,
+  initialHealthRecords,
+  initialKoreNotes,
+  initialShoppingItems,
+  initialPendingCleaningTasks,
+  initialWeeklyMenu,
+  initialSleepLogs,
+}: HomeClientProps) {
   const [showAgent, setShowAgent] = useState(false);
   const [showCorcho, setShowCorcho] = useState(false);
   const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
@@ -359,26 +399,57 @@ export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
   const [usuarioPerfil, setUsuarioPerfil] = useState<PerfilUsuario>("Ander");
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
-  const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>([]);
-  const [booting, setBooting] = useState(true);
+  const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>(
+    initialCalendarEvents
+      .filter((row) => withinAgendaWindow((row.date ?? "").slice(0, 10)))
+      .map(calendarRowToEvent),
+  );
+  const [mounted, setMounted] = useState(false);
+  const booting = false;
 
   const [domainsOpen, setDomainsOpen] = useState(true);
   const [domainCardHover, setDomainCardHover] = useState<Record<string, boolean>>({});
-  const [domains, setDomains] = useState<DomainCard[]>(DOMAINS);
+  const [domains, setDomains] = useState<DomainCard[]>(() => {
+    const mapped = initialDomains.map((row) =>
+      enrichSuenoDomain(
+        enrichLimpiezaDomain(
+          enrichMenuDomain(enrichComprasDomainFromShoppingItems(mergedDomainCard(row), initialShoppingItems), initialWeeklyMenu),
+          initialPendingCleaningTasks,
+        ),
+        initialSleepLogs,
+      ),
+    );
+    return mergeDomainsWithFallback(mapped, DOMAINS);
+  });
   const [corchoMessages, setCorchoMessages] = useState<CorchoMessage[]>(
-    initialCorchoMessages.length > 0 ? initialCorchoMessages : [],
+    mapKoreNotesToCorchoMessages(initialKoreNotes),
   );
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
   const [healthOpen, setHealthOpen] = useState(false);
-  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
-  const [salud, setSalud] = useState<SaludData>({
-    Peque: { citas: [], medicaciones: [] },
-    Ander: { citas: [], medicaciones: [] },
-    Leire: { citas: [], medicaciones: [] },
+  const [expenses, setExpenses] = useState<ExpenseItem[]>(
+    initialExpenses
+      .map(mapExpenseRowToItem)
+      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
+  );
+  const [salud, setSalud] = useState<SaludData>(() => {
+    const filtered = initialHealthRecords.filter((r) => {
+      const active = r.status === "active" || r.status === "pending";
+      if (!active) return false;
+      if (r.type === "appointment") return Boolean((r.date_time ?? "").trim());
+      if (r.type === "medication") return Boolean((r.next_dose_at ?? "").trim());
+      return false;
+    });
+    return saludFromHealthRecords(filtered) as SaludData;
   });
-  const [anderStress, setAnderStress] = useState(5);
-  const [leireStress, setLeireStress] = useState(5);
+  const [anderStress, setAnderStress] = useState(() => {
+    const a = initialProfiles.find((p) => p.id === ANDER_ID);
+    return Math.min(10, Math.max(1, Math.round(a?.stress_level ?? 5)));
+  });
+  const [leireStress, setLeireStress] = useState(() => {
+    const l = initialProfiles.find((p) => p.id === LEIRE_ID);
+    return Math.min(10, Math.max(1, Math.round(l?.stress_level ?? 5)));
+  });
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -475,14 +546,14 @@ export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
       setCorchoMessages(
         mapped.length > 0
           ? mapped
-          : initialCorchoMessages.length > 0
-            ? initialCorchoMessages
+          : initialKoreNotes.length > 0
+            ? mapKoreNotesToCorchoMessages(initialKoreNotes)
             : CORCHO_MESSAGES,
       );
     } catch {
-      setCorchoMessages(initialCorchoMessages.length > 0 ? initialCorchoMessages : CORCHO_MESSAGES);
+      setCorchoMessages(initialKoreNotes.length > 0 ? mapKoreNotesToCorchoMessages(initialKoreNotes) : CORCHO_MESSAGES);
     }
-  }, [initialCorchoMessages]);
+  }, [initialKoreNotes]);
 
   const handleCloseAgentChat = useCallback(() => {
     setShowAgent(false);
@@ -492,12 +563,8 @@ export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
   }, [loadAgenda]);
 
   useEffect(() => {
-    queueMicrotask(() => {
-      void Promise.all([loadProfiles(), loadDomains(), loadAgenda(), loadExpenses(), loadSalud(), loadCorcho()]).finally(() => {
-        setBooting(false);
-      });
-    });
-  }, [loadAgenda, loadCorcho, loadDomains, loadExpenses, loadProfiles, loadSalud]);
+    setMounted(true);
+  }, []);
 
   useKoreRealtime(
     useCallback(
@@ -757,7 +824,13 @@ export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
         boxSizing: "border-box",
       }}
     >
-      <div style={mobileShell}>
+      <div
+        style={{
+          ...mobileShell,
+          opacity: mounted ? 1 : 0,
+          transition: "opacity 0.4s ease-in",
+        }}
+      >
       <header
         style={{
           position: "fixed",
