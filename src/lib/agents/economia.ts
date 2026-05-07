@@ -129,7 +129,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const { start, end } = monthWindow();
       const rows = await getExpenses();
       const inMonth = rows.filter((r) => {
-        const t = new Date(r.created_at).getTime();
+        const t = new Date(r.created_at ?? "").getTime();
         return t >= start.getTime() && t <= end.getTime();
       });
       const byCat: Record<string, number> = {};

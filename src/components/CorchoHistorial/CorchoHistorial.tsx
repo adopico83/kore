@@ -46,7 +46,7 @@ export function CorchoHistorial({ onClose }: CorchoHistorialProps) {
             name: isAnder ? "Ander" : "Leire",
             initial: isAnder ? "A" : "L",
             avatarBorder: isAnder ? "#10b981" : "#f59e0b",
-            at: row.created_at,
+            at: row.created_at ?? "",
             text: String(row.content ?? ""),
           };
         });

@@ -164,7 +164,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
       id: row.id,
       role: row.sender_id === LEIRE_ID ? "leire" : "ander",
       content: String(row.content ?? "").trim(),
-      at: row.created_at,
+      at: row.created_at ?? "",
     }));
     setHistorial(mapped);
     const first = mapped[0]?.content?.trim() ?? "";

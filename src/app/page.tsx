@@ -23,7 +23,7 @@ export default async function Home() {
       avatar: who === "Leire" ? "L" : "A",
       ownerColor: who === "Leire" ? "#f59e0b" : "#10b981",
       text: row.content ?? "(nota sin texto)",
-      when: new Date(row.created_at).toLocaleString("es-ES"),
+      when: new Date(row.created_at ?? "").toLocaleString("es-ES"),
     };
   });
 

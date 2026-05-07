@@ -246,8 +246,8 @@ function mapExpenseRowToItem(row: Expense): ExpenseItem {
     amount: row.amount,
     category,
     paidBy: row.payer_id === LEIRE_ID ? "Leire" : "Ander",
-    shared: row.is_shared,
-    at: row.created_at,
+    shared: row.is_shared ?? false,
+    at: row.created_at ?? "",
   };
 }
 
@@ -387,8 +387,8 @@ export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
       const profiles = await getProfiles();
       const a = profiles.find((p) => p.id === ANDER_ID);
       const l = profiles.find((p) => p.id === LEIRE_ID);
-      if (a) setAnderStress(Math.min(10, Math.max(1, Math.round(a.stress_level))));
-      if (l) setLeireStress(Math.min(10, Math.max(1, Math.round(l.stress_level))));
+      if (a) setAnderStress(Math.min(10, Math.max(1, Math.round(a.stress_level ?? 0))));
+      if (l) setLeireStress(Math.min(10, Math.max(1, Math.round(l.stress_level ?? 0))));
     } catch {
       setAnderStress(5);
       setLeireStress(5);
@@ -471,7 +471,7 @@ export function HomeClient({ initialCorchoMessages = [] }: HomeClientProps) {
           avatar: who === "Leire" ? "L" : "A",
           ownerColor: who === "Leire" ? "#f59e0b" : "#10b981",
           text: r.content ?? "(nota sin texto)",
-          when: new Date(r.created_at).toLocaleString("es-ES"),
+          when: new Date(r.created_at ?? "").toLocaleString("es-ES"),
         };
       });
       setCorchoMessages(

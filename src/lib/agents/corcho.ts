@@ -109,7 +109,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const aNotes = await getKoreNotes(ANDER_ID);
       const lNotes = await getKoreNotes(LEIRE_ID);
       const merged = [...aNotes, ...lNotes].sort(
-        (x, y) => new Date(y.created_at).getTime() - new Date(x.created_at).getTime(),
+        (x, y) => new Date(y.created_at ?? "").getTime() - new Date(x.created_at ?? "").getTime(),
       );
       const seen = new Set<string>();
       const unique = merged.filter((n) => {

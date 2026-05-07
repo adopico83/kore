@@ -162,8 +162,8 @@ export default function LoginPage() {
           }}
         >
           <svg
-            width="40"
-            height="40"
+            width="220"
+            height="220"
             viewBox="0 0 160 160"
             fill="none"
             aria-hidden

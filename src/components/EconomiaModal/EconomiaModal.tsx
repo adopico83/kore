@@ -63,8 +63,8 @@ function expenseRowToItem(row: Expense): ExpenseItem {
     amount: row.amount,
     category,
     paidBy: row.payer_id === LEIRE_ID ? "Leire" : "Ander",
-    shared: row.is_shared,
-    at: row.created_at,
+    shared: row.is_shared ?? false,
+    at: row.created_at ?? "",
   };
 }
 
