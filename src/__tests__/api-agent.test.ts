@@ -68,4 +68,25 @@ describe("POST /api/agent", () => {
     expect(res.status).toBe(500);
     expect(body).toEqual({ error: "Error interno del agente" });
   });
+
+  it("devuelve 200 con request válida (mock de OpenAI y Supabase)", async () => {
+    mockGetAgentMemory.mockResolvedValueOnce([]);
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: "Todo OK",
+            tool_calls: [],
+          },
+        },
+      ],
+    });
+    const { POST } = await import("@/app/api/agent/route");
+    const request = { json: vi.fn(async () => ({ mensaje: "hola" })) } as never;
+
+    const res = await POST(request);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ reply: "Todo OK", respuesta: "Todo OK" });
+  });
 });

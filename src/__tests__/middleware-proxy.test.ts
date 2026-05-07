@@ -54,4 +54,15 @@ describe("proxy route protection", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/");
   });
+
+  it("deja pasar ruta protegida cuando hay sesión activa", async () => {
+    withSession({ user: { id: "u1" } });
+    const { proxy } = await import("@/proxy");
+    const req = new NextRequest("http://localhost/dashboard");
+
+    const res = await proxy(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
 });
