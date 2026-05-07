@@ -14,6 +14,9 @@ const mockCreate = vi.fn();
 
 vi.mock("@/lib/kore-db", () => ({
   getAgentMemory: mockGetAgentMemory,
+  getProfiles: vi.fn().mockResolvedValue([]),
+  getShoppingItems: vi.fn().mockResolvedValue([]),
+  getPendingCleaningTasks: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/lib/agents/orchestrator", () => ({

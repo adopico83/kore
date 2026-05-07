@@ -657,6 +657,7 @@ export function AgentChat({ onClose }: AgentChatProps) {
           mensaje: textoTrim,
           historial: histParaApi.slice(0, -1),
           ...(imagenesEnviar.length > 0 ? { imagenes: imagenesEnviar } : {}),
+          input_fue_audio: opts?.desdeTranscripcion === true,
         }),
       });
       const data = (await res.json()) as {

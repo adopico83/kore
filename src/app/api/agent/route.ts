@@ -4,13 +4,24 @@ import OpenAI from "openai";
 import { applyGuardrails, type PlannedTool } from "@/lib/agent/guardrails";
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
 import { getScopedFamilyId } from "@/lib/family-context";
-import { getAgentMemory } from "@/lib/kore-db";
+import {
+  ANDER_ID,
+  LEIRE_ID,
+  getAgentMemory,
+  getPendingCleaningTasks,
+  getProfiles,
+  getShoppingItems,
+} from "@/lib/kore-db";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 type Hist = { role: string; content: string };
+
+function hhmmNowServer(): string {
+  return new Date().toTimeString().slice(0, 5);
+}
 
 const IMAGEN_VISION_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
@@ -186,6 +197,7 @@ export async function POST(request: NextRequest) {
       mensaje?: string;
       historial?: Hist[];
       imagenes?: string[];
+      input_fue_audio?: boolean;
     };
 
     const mensaje = typeof body.mensaje === "string" ? body.mensaje.trim() : "";
@@ -197,6 +209,7 @@ export async function POST(request: NextRequest) {
       .map((x) => normalizarImagenDataUrl(x))
       .filter((x): x is string => x != null)
       .slice(0, 8);
+    const inputFueAudio = body.input_fue_audio === true;
 
     if (!mensaje && imagenes.length === 0) {
       return NextResponse.json(
@@ -205,8 +218,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const memories = await getAgentMemory(familyId);
+    const [memories, profiles, shoppingItems, pendingCleaningTasks] = await Promise.all([
+      getAgentMemory(familyId),
+      getProfiles(familyId),
+      getShoppingItems(familyId),
+      getPendingCleaningTasks(familyId),
+    ]);
     const systemPrompt = buildSystemPrompt(memories);
+    const anderStress = profiles.find((p) => p.id === ANDER_ID)?.stress_level ?? 5;
+    const leireStress = profiles.find((p) => p.id === LEIRE_ID)?.stress_level ?? 5;
+    const energiaAnder = Math.max(1, Math.min(10, 10 - anderStress));
+    const energiaLeire = Math.max(1, Math.min(10, 10 - leireStress));
+    const energiaFamiliar = Math.round((energiaAnder + energiaLeire) / 2);
+    const tareasPendientes =
+      shoppingItems.filter((item) => !item.completed).length + pendingCleaningTasks.length;
+    const snapshotText = [
+      "CONTEXTO ACTUAL DEL HOGAR:",
+      `- hora_actual: ${hhmmNowServer()}`,
+      `- energia_familiar: ${energiaFamiliar}`,
+      "- estado_sueño: no disponible",
+      `- tareas_pendientes: ${tareasPendientes}`,
+      `- input_fue_audio: ${inputFueAudio ? "true" : "false"}`,
+    ].join("\n");
 
     const historialLimpio: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     for (const h of rawHist.slice(-40)) {
@@ -229,6 +262,7 @@ export async function POST(request: NextRequest) {
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
+      { role: "system", content: snapshotText },
       ...historialLimpio,
       { role: "user", content: userParts },
     ];
