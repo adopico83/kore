@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const memories = await getAgentMemory();
+    const memories = await getAgentMemory(familyId);
     const systemPrompt = buildSystemPrompt(memories);
 
     const historialLimpio: OpenAI.Chat.ChatCompletionMessageParam[] = [];
@@ -289,7 +289,7 @@ export async function POST(request: NextRequest) {
           let success = false;
           let errorMessage: string | undefined;
           try {
-            result = await executeTool(name, args);
+            result = await executeTool(name, args, familyId);
             const normalized = normalizeToolResult(name, result);
             success = normalized.success;
             errorMessage = normalized.error;
@@ -379,7 +379,7 @@ export async function POST(request: NextRequest) {
           let success = false;
           let errorMessage: string | undefined;
           try {
-            result = await executeTool(step.tool, step.args);
+            result = await executeTool(step.tool, step.args, familyId);
             const normalized = normalizeToolResult(step.tool, result);
             success = normalized.success;
             errorMessage = normalized.error;
@@ -418,7 +418,7 @@ export async function POST(request: NextRequest) {
             let success = false;
             let errorMessage: string | undefined;
             try {
-              result = await executeTool(readStep.tool, readStep.args);
+              result = await executeTool(readStep.tool, readStep.args, familyId);
               const normalized = normalizeToolResult(readStep.tool, result);
               success = normalized.success;
               errorMessage = normalized.error;

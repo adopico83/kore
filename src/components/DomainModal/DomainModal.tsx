@@ -5,11 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 import {
-  ANDER_ID,
   addShoppingItem,
   completeShoppingItem,
   deleteShoppingItem,
   getShoppingItems,
+} from "@/lib/actions/shopping";
+import {
+  ANDER_ID,
   type ShoppingItemRow,
 } from "@/lib/kore-db";
 

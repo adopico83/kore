@@ -13,7 +13,8 @@ import {
 } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
-import { addKoreNote, ANDER_ID, getKoreNotes, LEIRE_ID } from "@/lib/kore-db";
+import { addKoreNote, getKoreNotes } from "@/lib/actions/corcho";
+import { ANDER_ID, LEIRE_ID } from "@/lib/kore-db";
 
 const GREEN = "#4CC9A0";
 const PURPLE = "#9B8FE8";

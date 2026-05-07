@@ -79,7 +79,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Compras." };
   }
@@ -91,7 +91,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const category = String(a.category ?? "otro");
       const priority = String(a.priority ?? "media");
       if (!name) throw new Error("Falta name para añadir a compras.");
-      const item = await addShoppingItem({
+      const item = await addShoppingItem(familyId, {
         name,
         quantity: a.quantity != null ? String(a.quantity) : undefined,
         category,
@@ -100,23 +100,23 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       return { ok: true, item };
     }
     case "get_shopping_list": {
-      const items = await getShoppingItems();
+      const items = await getShoppingItems(familyId);
       return { ok: true, items };
     }
     case "complete_shopping_item": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para completar item de compras.");
-      await completeShoppingItem(id);
+      await completeShoppingItem(familyId, id);
       return { ok: true, completed: id };
     }
     case "delete_shopping_item": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para eliminar item de compras.");
-      await deleteShoppingItem(id);
+      await deleteShoppingItem(familyId, id);
       return { ok: true, deleted: id };
     }
     case "clear_completed_items": {
-      await clearCompletedItems();
+      await clearCompletedItems(familyId);
       return { ok: true };
     }
     default:

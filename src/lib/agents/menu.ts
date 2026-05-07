@@ -72,7 +72,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Menú." };
   }
@@ -85,23 +85,23 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const dish = String(a.dish ?? "").trim();
       const week_start = a.week_start ? String(a.week_start) : undefined;
       if (!day || !meal || !dish) throw new Error("Faltan campos para menú.");
-      const row = await addMenuItem({ day, meal, dish, week_start });
+      const row = await addMenuItem(familyId, { day, meal, dish, week_start });
       return { ok: true, item: row };
     }
     case "get_weekly_menu": {
       const week_start = a.week_start ? String(a.week_start) : undefined;
-      const menu = await getWeeklyMenu(week_start);
+      const menu = await getWeeklyMenu(familyId, week_start);
       return { ok: true, menu };
     }
     case "clear_day_menu": {
       const day = a.day as Day;
       const week_start = a.week_start ? String(a.week_start) : undefined;
       if (!day) throw new Error("Falta day para limpiar menú.");
-      await clearDayMenu(day, week_start);
+      await clearDayMenu(familyId, day, week_start);
       return { ok: true, day };
     }
     case "suggest_menu": {
-      const st = await getWeeklyMenu();
+      const st = await getWeeklyMenu(familyId);
       const pool = [
         "lentejas",
         "pasta con tomate",

@@ -98,7 +98,7 @@ function monthWindow() {
   return { start, end };
 }
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Economía." };
   }
@@ -122,12 +122,12 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
         is_shared,
         source: "manual",
       };
-      const row = await addExpense(insert);
+      const row = await addExpense(familyId, insert);
       return { ok: true, expense: row };
     }
     case "get_monthly_summary": {
       const { start, end } = monthWindow();
-      const rows = await getExpenses();
+      const rows = await getExpenses(familyId);
       const inMonth = rows.filter((r) => {
         const t = new Date(r.created_at ?? "").getTime();
         return t >= start.getTime() && t <= end.getTime();
@@ -142,11 +142,11 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     }
     case "get_expenses_list": {
       const limit = Math.min(100, Math.max(1, Number(a.limit) || 30));
-      const rows = await getExpenses();
+      const rows = await getExpenses(familyId);
       return { ok: true, expenses: rows.slice(0, limit) };
     }
     case "get_balance": {
-      const rows = await getExpenses();
+      const rows = await getExpenses(familyId);
       const shared = rows.filter((r) => r.is_shared);
       const totalShared = shared.reduce((acc, r) => acc + Math.abs(r.amount), 0);
       const paidAnder = shared
@@ -168,7 +168,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     case "delete_expense": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await deleteExpense(id);
+      await deleteExpense(familyId, id);
       return { ok: true, deleted: id };
     }
     default:

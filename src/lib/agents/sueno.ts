@@ -59,7 +59,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Sueño." };
   }
@@ -69,7 +69,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     case "log_wakeup": {
       const person = String(a.person ?? "").trim();
       if (!person) throw new Error("Falta person para log_wakeup.");
-      const row = await logWakeup({
+      const row = await logWakeup(familyId, {
         person,
         ...(a.reason ? { reason: String(a.reason) } : {}),
       });
@@ -79,16 +79,16 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const person = String(a.person ?? "");
       const hours = Number(a.hours);
       if (!person || Number.isNaN(hours)) throw new Error("Datos inválidos para log_sleep_hours.");
-      const row = await logSleepHours(person, hours);
+      const row = await logSleepHours(familyId, person, hours);
       return { ok: true, log: row };
     }
     case "get_sleep_summary": {
       const days = Math.min(30, Math.max(1, Number(a.days) || 7));
-      const logs = await getSleepLogs(days);
+      const logs = await getSleepLogs(familyId, days);
       return { ok: true, days, logs };
     }
     case "get_night_recovery_score": {
-      const result = await getNightRecoveryScore();
+      const result = await getNightRecoveryScore(familyId);
       return { ok: true, ...result, note: result.night_recovery_score == null ? "Sin métrica para hoy." : undefined };
     }
     default:

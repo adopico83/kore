@@ -7,7 +7,7 @@ import {
   deleteHealthRecord,
   getHealthRecords,
   updateHealthRecord,
-} from "@/lib/kore-db";
+} from "@/lib/actions/health";
 import {
   buildCitaHealthInsert,
   buildCitaHealthUpdate,

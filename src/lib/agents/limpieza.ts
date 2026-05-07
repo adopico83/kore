@@ -67,7 +67,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Limpieza." };
   }
@@ -81,21 +81,21 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const assignedRaw = String(a.assigned_to ?? "");
       const assigned_to = assignedRaw === "Ander" ? ANDER_ID : assignedRaw === "Leire" ? LEIRE_ID : undefined;
       if (!zone || !task) throw new Error("Faltan zone o task para limpieza.");
-      const created = await addCleaningTask({ zone, task, frequency, assigned_to });
+      const created = await addCleaningTask(familyId, { zone, task, frequency, assigned_to });
       return { ok: true, task: created };
     }
     case "get_cleaning_tasks": {
-      const tasks = await getCleaningTasks();
+      const tasks = await getCleaningTasks(familyId);
       return { ok: true, tasks };
     }
     case "complete_cleaning_task": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para completar tarea de limpieza.");
-      await completeCleaningTask(id);
+      await completeCleaningTask(familyId, id);
       return { ok: true, completed: id };
     }
     case "get_pending_cleaning": {
-      const pending = await getPendingCleaningTasks();
+      const pending = await getPendingCleaningTasks(familyId);
       return { ok: true, pending };
     }
     default:

@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/types/database";
-import { getScopedFamilyId } from "@/lib/family-context";
 import { getBrowserClient } from "@/lib/supabase/client";
 
 export const ANDER_ID = "6204d1a5-bbba-4a01-a9f2-b0742ee0bcd4";
@@ -208,14 +207,7 @@ function throwDb(context: string, error: { message: string } | null) {
   if (error) throw new Error(`${context}: ${error.message}`);
 }
 
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
-
-export async function getProfiles(): Promise<Profile[]> {
-  const familyId = await requireFamilyId();
+export async function getProfiles(familyId: string): Promise<Profile[]> {
   const { data, error } = await db()
     .from("profiles")
     .select("*")
@@ -225,17 +217,17 @@ export async function getProfiles(): Promise<Profile[]> {
   return data ?? [];
 }
 
-export async function updateStressLevel(userId: string, level: number): Promise<void> {
+export async function updateStressLevel(familyId: string, userId: string, level: number): Promise<void> {
   const stress_level = Math.min(10, Math.max(1, Math.round(level)));
   const { error } = await db()
     .from("profiles")
     .update({ stress_level, updated_at: new Date().toISOString() })
+    .eq("family_id", familyId)
     .eq("id", userId);
   throwDb("updateStressLevel", error);
 }
 
-export async function getCalendarEvents(): Promise<CalendarEventRow[]> {
-  const familyId = await requireFamilyId();
+export async function getCalendarEvents(familyId: string): Promise<CalendarEventRow[]> {
   const { data, error } = await db()
     .from("calendar_events")
     .select("*")
@@ -246,8 +238,7 @@ export async function getCalendarEvents(): Promise<CalendarEventRow[]> {
   return data ?? [];
 }
 
-export async function addCalendarEvent(data: CalendarEventInsert): Promise<CalendarEventRow> {
-  const familyId = await requireFamilyId();
+export async function addCalendarEvent(familyId: string, data: CalendarEventInsert): Promise<CalendarEventRow> {
   const row = {
     family_id: familyId,
     title: data.title,
@@ -262,23 +253,23 @@ export async function addCalendarEvent(data: CalendarEventInsert): Promise<Calen
   return created as CalendarEventRow;
 }
 
-export async function deleteCalendarEvent(id: string): Promise<void> {
-  const { error } = await db().from("calendar_events").delete().eq("id", id);
+export async function deleteCalendarEvent(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("calendar_events").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteCalendarEvent", error);
 }
 
 export async function updateCalendarEvent(
+  familyId: string,
   id: string,
   data: Partial<Pick<CalendarEventRow, "title" | "date" | "time" | "created_by">>,
 ): Promise<void> {
-  const { error } = await db().from("calendar_events").update(data).eq("id", id);
+  const { error } = await db().from("calendar_events").update(data).eq("family_id", familyId).eq("id", id);
   throwDb("updateCalendarEvent", error);
 }
 
 export type HealthRecordInsert = Database["public"]["Tables"]["health_records"]["Insert"];
 
-export async function getHealthRecords(patientId?: string): Promise<HealthRecord[]> {
-  const familyId = await requireFamilyId();
+export async function getHealthRecords(familyId: string, patientId?: string): Promise<HealthRecord[]> {
   let query = db()
     .from("health_records")
     .select("*")
@@ -290,8 +281,7 @@ export async function getHealthRecords(patientId?: string): Promise<HealthRecord
   return data ?? [];
 }
 
-export async function addHealthRecord(data: HealthRecordInsert): Promise<HealthRecord> {
-  const familyId = await requireFamilyId();
+export async function addHealthRecord(familyId: string, data: HealthRecordInsert): Promise<HealthRecord> {
   const { data: created, error } = await db()
     .from("health_records")
     .insert({ ...data, family_id: familyId })
@@ -302,22 +292,22 @@ export async function addHealthRecord(data: HealthRecordInsert): Promise<HealthR
 }
 
 export async function updateHealthRecord(
+  familyId: string,
   id: string,
   data: Partial<Omit<HealthRecord, "id" | "created_at">>,
 ): Promise<void> {
-  const { error } = await db().from("health_records").update(data).eq("id", id);
+  const { error } = await db().from("health_records").update(data).eq("family_id", familyId).eq("id", id);
   throwDb("updateHealthRecord", error);
 }
 
-export async function deleteHealthRecord(id: string): Promise<void> {
-  const { error } = await db().from("health_records").delete().eq("id", id);
+export async function deleteHealthRecord(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("health_records").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteHealthRecord", error);
 }
 
 export type ExpenseInsert = Database["public"]["Tables"]["expenses"]["Insert"];
 
-export async function getExpenses(): Promise<Expense[]> {
-  const familyId = await requireFamilyId();
+export async function getExpenses(familyId: string): Promise<Expense[]> {
   const { data, error } = await db()
     .from("expenses")
     .select("*")
@@ -327,8 +317,7 @@ export async function getExpenses(): Promise<Expense[]> {
   return data ?? [];
 }
 
-export async function addExpense(data: ExpenseInsert): Promise<Expense> {
-  const familyId = await requireFamilyId();
+export async function addExpense(familyId: string, data: ExpenseInsert): Promise<Expense> {
   const { data: created, error } = await db()
     .from("expenses")
     .insert({ ...data, family_id: familyId })
@@ -338,15 +327,14 @@ export async function addExpense(data: ExpenseInsert): Promise<Expense> {
   return created as Expense;
 }
 
-export async function deleteExpense(id: string): Promise<void> {
-  const { error } = await db().from("expenses").delete().eq("id", id);
+export async function deleteExpense(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("expenses").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteExpense", error);
 }
 
 export type KoreNoteInsert = Database["public"]["Tables"]["kore_notes"]["Insert"];
 
-export async function getKoreNotes(recipientId?: string): Promise<KoreNote[]> {
-  const familyId = await requireFamilyId();
+export async function getKoreNotes(familyId: string, recipientId?: string): Promise<KoreNote[]> {
   let query = db()
     .from("kore_notes")
     .select("*")
@@ -358,8 +346,7 @@ export async function getKoreNotes(recipientId?: string): Promise<KoreNote[]> {
   return data ?? [];
 }
 
-export async function addKoreNote(data: KoreNoteInsert): Promise<KoreNote> {
-  const familyId = await requireFamilyId();
+export async function addKoreNote(familyId: string, data: KoreNoteInsert): Promise<KoreNote> {
   const { data: created, error } = await db()
     .from("kore_notes")
     .insert({ ...data, family_id: familyId })
@@ -369,13 +356,12 @@ export async function addKoreNote(data: KoreNoteInsert): Promise<KoreNote> {
   return created as KoreNote;
 }
 
-export async function markNoteAsRead(id: string): Promise<void> {
-  const { error } = await db().from("kore_notes").update({ status: "read" }).eq("id", id);
+export async function markNoteAsRead(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("kore_notes").update({ status: "read" }).eq("family_id", familyId).eq("id", id);
   throwDb("markNoteAsRead", error);
 }
 
-export async function getDomains(): Promise<Domain[]> {
-  const familyId = await requireFamilyId();
+export async function getDomains(familyId: string): Promise<Domain[]> {
   const { data, error } = await db()
     .from("domains")
     .select("*")
@@ -385,13 +371,17 @@ export async function getDomains(): Promise<Domain[]> {
   return data ?? [];
 }
 
-export async function updateDomain(id: string, data: Partial<Domain>): Promise<void> {
-  const { error } = await db().from("domains").update(data).eq("id", id);
+export async function updateDomain(familyId: string, id: string, data: Partial<Domain>): Promise<void> {
+  const { error } = await db().from("domains").update(data).eq("family_id", familyId).eq("id", id);
   throwDb("updateDomain", error);
 }
 
-export async function addDomainHistory(domainId: string, text: string, createdBy: string): Promise<void> {
-  const familyId = await requireFamilyId();
+export async function addDomainHistory(
+  familyId: string,
+  domainId: string,
+  text: string,
+  createdBy: string,
+): Promise<void> {
   const { error } = await db().from("domain_history").insert({
     family_id: familyId,
     domain_id: domainId,
@@ -401,8 +391,7 @@ export async function addDomainHistory(domainId: string, text: string, createdBy
   throwDb("addDomainHistory", error);
 }
 
-export async function getDomainHistory(domainId: string): Promise<DomainHistoryRow[]> {
-  const familyId = await requireFamilyId();
+export async function getDomainHistory(familyId: string, domainId: string): Promise<DomainHistoryRow[]> {
   const { data, error } = await db()
     .from("domain_history")
     .select("*")
@@ -415,8 +404,7 @@ export async function getDomainHistory(domainId: string): Promise<DomainHistoryR
 
 export type DailyMetricsUpsert = Database["public"]["Tables"]["daily_metrics"]["Insert"];
 
-export async function getDailyMetrics(date: string): Promise<DailyMetrics | null> {
-  const familyId = await requireFamilyId();
+export async function getDailyMetrics(familyId: string, date: string): Promise<DailyMetrics | null> {
   const { data, error } = await db()
     .from("daily_metrics")
     .select("*")
@@ -427,16 +415,14 @@ export async function getDailyMetrics(date: string): Promise<DailyMetrics | null
   return data;
 }
 
-export async function upsertDailyMetrics(data: DailyMetricsUpsert): Promise<void> {
-  const familyId = await requireFamilyId();
+export async function upsertDailyMetrics(familyId: string, data: DailyMetricsUpsert): Promise<void> {
   const { error } = await db()
     .from("daily_metrics")
     .upsert({ ...data, family_id: familyId }, { onConflict: "date" });
   throwDb("upsertDailyMetrics", error);
 }
 
-export async function getAgentMemory(category?: string): Promise<AgentMemoryRow[]> {
-  const familyId = await requireFamilyId();
+export async function getAgentMemory(familyId: string, category?: string): Promise<AgentMemoryRow[]> {
   let query = db()
     .from("agent_memory")
     .select("*")
@@ -449,8 +435,12 @@ export async function getAgentMemory(category?: string): Promise<AgentMemoryRow[
   return data ?? [];
 }
 
-export async function upsertAgentMemory(key: string, value: string, category: string): Promise<void> {
-  const familyId = await requireFamilyId();
+export async function upsertAgentMemory(
+  familyId: string,
+  key: string,
+  value: string,
+  category: string,
+): Promise<void> {
   const now = new Date().toISOString();
   const { data: existing, error: selErr } = await db()
     .from("agent_memory")
@@ -478,8 +468,7 @@ export async function upsertAgentMemory(key: string, value: string, category: st
   throwDb("upsertAgentMemory(insert)", error);
 }
 
-export async function getShoppingItems(): Promise<ShoppingItemRow[]> {
-  const familyId = await requireFamilyId();
+export async function getShoppingItems(familyId: string): Promise<ShoppingItemRow[]> {
   const { data, error } = await db()
     .from("shopping_items")
     .select("*")
@@ -489,14 +478,16 @@ export async function getShoppingItems(): Promise<ShoppingItemRow[]> {
   return data ?? [];
 }
 
-export async function addShoppingItem(data: {
-  name: string;
-  quantity?: string;
-  category?: string;
-  priority?: string;
-  created_by?: string;
-}): Promise<ShoppingItemRow> {
-  const familyId = await requireFamilyId();
+export async function addShoppingItem(
+  familyId: string,
+  data: {
+    name: string;
+    quantity?: string;
+    category?: string;
+    priority?: string;
+    created_by?: string;
+  },
+): Promise<ShoppingItemRow> {
   const payload = {
     family_id: familyId,
     name: data.name,
@@ -534,23 +525,22 @@ export async function addShoppingItem(data: {
   return created as ShoppingItemRow;
 }
 
-export async function completeShoppingItem(id: string): Promise<void> {
-  const { error } = await db().from("shopping_items").update({ completed: true }).eq("id", id);
+export async function completeShoppingItem(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("shopping_items").update({ completed: true }).eq("family_id", familyId).eq("id", id);
   throwDb("completeShoppingItem", error);
 }
 
-export async function deleteShoppingItem(id: string): Promise<void> {
-  const { error } = await db().from("shopping_items").delete().eq("id", id);
+export async function deleteShoppingItem(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("shopping_items").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteShoppingItem", error);
 }
 
-export async function clearCompletedItems(): Promise<void> {
-  const { error } = await db().from("shopping_items").delete().eq("completed", true);
+export async function clearCompletedItems(familyId: string): Promise<void> {
+  const { error } = await db().from("shopping_items").delete().eq("family_id", familyId).eq("completed", true);
   throwDb("clearCompletedItems", error);
 }
 
-export async function getCleaningTasks(): Promise<CleaningTaskRow[]> {
-  const familyId = await requireFamilyId();
+export async function getCleaningTasks(familyId: string): Promise<CleaningTaskRow[]> {
   const { data, error } = await db()
     .from("cleaning_tasks")
     .select("*")
@@ -560,13 +550,15 @@ export async function getCleaningTasks(): Promise<CleaningTaskRow[]> {
   return data ?? [];
 }
 
-export async function addCleaningTask(data: {
-  zone: string;
-  task: string;
-  frequency?: string;
-  assigned_to?: string;
-}): Promise<CleaningTaskRow> {
-  const familyId = await requireFamilyId();
+export async function addCleaningTask(
+  familyId: string,
+  data: {
+    zone: string;
+    task: string;
+    frequency?: string;
+    assigned_to?: string;
+  },
+): Promise<CleaningTaskRow> {
   const payload = {
     family_id: familyId,
     zone: data.zone,
@@ -591,13 +583,12 @@ export async function addCleaningTask(data: {
   return created as CleaningTaskRow;
 }
 
-export async function completeCleaningTask(id: string): Promise<void> {
-  const { error } = await db().from("cleaning_tasks").update({ completed: true }).eq("id", id);
+export async function completeCleaningTask(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("cleaning_tasks").update({ completed: true }).eq("family_id", familyId).eq("id", id);
   throwDb("completeCleaningTask", error);
 }
 
-export async function getPendingCleaningTasks(): Promise<CleaningTaskRow[]> {
-  const familyId = await requireFamilyId();
+export async function getPendingCleaningTasks(familyId: string): Promise<CleaningTaskRow[]> {
   const { data, error } = await db()
     .from("cleaning_tasks")
     .select("*")
@@ -616,8 +607,7 @@ function currentWeekStartIso(now = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export async function getWeeklyMenu(week_start?: string): Promise<MenuItemRow[]> {
-  const familyId = await requireFamilyId();
+export async function getWeeklyMenu(familyId: string, week_start?: string): Promise<MenuItemRow[]> {
   const targetWeek = (week_start ?? currentWeekStartIso()).slice(0, 10);
   const { data, error } = await db()
     .from("menu_items")
@@ -630,13 +620,15 @@ export async function getWeeklyMenu(week_start?: string): Promise<MenuItemRow[]>
   return data ?? [];
 }
 
-export async function addMenuItem(data: {
-  day: string;
-  meal: string;
-  dish: string;
-  week_start?: string;
-}): Promise<MenuItemRow> {
-  const familyId = await requireFamilyId();
+export async function addMenuItem(
+  familyId: string,
+  data: {
+    day: string;
+    meal: string;
+    dish: string;
+    week_start?: string;
+  },
+): Promise<MenuItemRow> {
   const payload = {
     family_id: familyId,
     day: data.day,
@@ -649,14 +641,13 @@ export async function addMenuItem(data: {
   return created as MenuItemRow;
 }
 
-export async function clearDayMenu(day: string, week_start?: string): Promise<void> {
+export async function clearDayMenu(familyId: string, day: string, week_start?: string): Promise<void> {
   const targetWeek = (week_start ?? currentWeekStartIso()).slice(0, 10);
-  const { error } = await db().from("menu_items").delete().eq("day", day).eq("week_start", targetWeek);
+  const { error } = await db().from("menu_items").delete().eq("family_id", familyId).eq("day", day).eq("week_start", targetWeek);
   throwDb("clearDayMenu", error);
 }
 
-export async function getSchoolEvents(): Promise<SchoolEventRow[]> {
-  const familyId = await requireFamilyId();
+export async function getSchoolEvents(familyId: string): Promise<SchoolEventRow[]> {
   const { data, error } = await db()
     .from("school_events")
     .select("*")
@@ -667,14 +658,16 @@ export async function getSchoolEvents(): Promise<SchoolEventRow[]> {
   return data ?? [];
 }
 
-export async function addSchoolEvent(data: {
-  title: string;
-  date: string;
-  time?: string;
-  type?: string;
-  description?: string;
-}): Promise<SchoolEventRow> {
-  const familyId = await requireFamilyId();
+export async function addSchoolEvent(
+  familyId: string,
+  data: {
+    title: string;
+    date: string;
+    time?: string;
+    type?: string;
+    description?: string;
+  },
+): Promise<SchoolEventRow> {
   const payload = {
     family_id: familyId,
     title: data.title,
@@ -699,8 +692,7 @@ export async function addSchoolEvent(data: {
   return created as SchoolEventRow;
 }
 
-export async function getSchoolMaterials(): Promise<SchoolMaterialRow[]> {
-  const familyId = await requireFamilyId();
+export async function getSchoolMaterials(familyId: string): Promise<SchoolMaterialRow[]> {
   const { data, error } = await db()
     .from("school_materials")
     .select("*")
@@ -710,8 +702,10 @@ export async function getSchoolMaterials(): Promise<SchoolMaterialRow[]> {
   return data ?? [];
 }
 
-export async function addSchoolMaterial(data: { item: string; urgency?: string }): Promise<SchoolMaterialRow> {
-  const familyId = await requireFamilyId();
+export async function addSchoolMaterial(
+  familyId: string,
+  data: { item: string; urgency?: string },
+): Promise<SchoolMaterialRow> {
   const payload = {
     family_id: familyId,
     item: data.item,
@@ -723,19 +717,18 @@ export async function addSchoolMaterial(data: { item: string; urgency?: string }
   return created as SchoolMaterialRow;
 }
 
-export async function completeSchoolMaterial(id: string): Promise<void> {
-  const { error } = await db().from("school_materials").update({ completed: true }).eq("id", id);
+export async function completeSchoolMaterial(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("school_materials").update({ completed: true }).eq("family_id", familyId).eq("id", id);
   throwDb("completeSchoolMaterial", error);
 }
 
-export async function deleteSchoolItem(id: string, type: "event" | "material"): Promise<void> {
+export async function deleteSchoolItem(familyId: string, id: string, type: "event" | "material"): Promise<void> {
   const table = type === "event" ? "school_events" : "school_materials";
-  const { error } = await db().from(table).delete().eq("id", id);
+  const { error } = await db().from(table).delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteSchoolItem", error);
 }
 
-export async function getLeisureActivities(person?: string): Promise<LeisureActivityRow[]> {
-  const familyId = await requireFamilyId();
+export async function getLeisureActivities(familyId: string, person?: string): Promise<LeisureActivityRow[]> {
   let query = db()
     .from("leisure_activities")
     .select("*")
@@ -747,13 +740,15 @@ export async function getLeisureActivities(person?: string): Promise<LeisureActi
   return data ?? [];
 }
 
-export async function addLeisureActivity(data: {
-  person: string;
-  activity: string;
-  date?: string;
-  duration_minutes?: number;
-}): Promise<LeisureActivityRow> {
-  const familyId = await requireFamilyId();
+export async function addLeisureActivity(
+  familyId: string,
+  data: {
+    person: string;
+    activity: string;
+    date?: string;
+    duration_minutes?: number;
+  },
+): Promise<LeisureActivityRow> {
   const payload = {
     family_id: familyId,
     person: data.person,
@@ -767,11 +762,11 @@ export async function addLeisureActivity(data: {
 }
 
 export async function logPersonalTime(
+  familyId: string,
   person: string,
   description: string,
   minutes: number,
 ): Promise<LeisureActivityRow> {
-  const familyId = await requireFamilyId();
   const payload = {
     family_id: familyId,
     person,
@@ -784,8 +779,7 @@ export async function logPersonalTime(
   return created as LeisureActivityRow;
 }
 
-export async function logWakeup(data: { person: string; reason?: string }): Promise<SleepLogRow> {
-  const familyId = await requireFamilyId();
+export async function logWakeup(familyId: string, data: { person: string; reason?: string }): Promise<SleepLogRow> {
   const payload = {
     family_id: familyId,
     person: data.person,
@@ -809,8 +803,7 @@ export async function logWakeup(data: { person: string; reason?: string }): Prom
   return created as SleepLogRow;
 }
 
-export async function logSleepHours(person: string, hours: number): Promise<SleepLogRow> {
-  const familyId = await requireFamilyId();
+export async function logSleepHours(familyId: string, person: string, hours: number): Promise<SleepLogRow> {
   const payload = {
     family_id: familyId,
     person,
@@ -823,8 +816,7 @@ export async function logSleepHours(person: string, hours: number): Promise<Slee
   return created as SleepLogRow;
 }
 
-export async function getSleepLogs(days = 7): Promise<SleepLogRow[]> {
-  const familyId = await requireFamilyId();
+export async function getSleepLogs(familyId: string, days = 7): Promise<SleepLogRow[]> {
   const cutoff = new Date(Date.now() - Math.max(1, days) * 24 * 3600 * 1000).toISOString();
   const { data, error } = await db()
     .from("sleep_logs")
@@ -836,9 +828,11 @@ export async function getSleepLogs(days = 7): Promise<SleepLogRow[]> {
   return data ?? [];
 }
 
-export async function getNightRecoveryScore(): Promise<{ date: string; night_recovery_score: number | null }> {
+export async function getNightRecoveryScore(
+  familyId: string,
+): Promise<{ date: string; night_recovery_score: number | null }> {
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const metric = await getDailyMetrics(date);
+  const metric = await getDailyMetrics(familyId, date);
   return { date, night_recovery_score: metric?.night_recovery_score ?? null };
 }

@@ -67,7 +67,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Corcho." };
   }
@@ -82,7 +82,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       if (!from || !to || from === to || !content || !priority) {
         return { error: "Remitente, destinatario o contenido inválidos." };
       }
-      const row = await addKoreNote({
+      const row = await addKoreNote(familyId, {
         sender_id: from,
         recipient_id: to,
         content,
@@ -95,19 +95,19 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     case "get_unread_notes": {
       const recipient = personToId(String(a.recipient ?? ""));
       if (!recipient) return { error: "Destinatario inválido." };
-      const notes = await getKoreNotes(recipient);
+      const notes = await getKoreNotes(familyId, recipient);
       const unread = notes.filter((n) => n.status === "unread");
       return { ok: true, notes: unread };
     }
     case "mark_note_read": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await markNoteAsRead(id);
+      await markNoteAsRead(familyId, id);
       return { ok: true, id };
     }
     case "get_notes_history": {
-      const aNotes = await getKoreNotes(ANDER_ID);
-      const lNotes = await getKoreNotes(LEIRE_ID);
+      const aNotes = await getKoreNotes(familyId, ANDER_ID);
+      const lNotes = await getKoreNotes(familyId, LEIRE_ID);
       const merged = [...aNotes, ...lNotes].sort(
         (x, y) => new Date(y.created_at ?? "").getTime() - new Date(x.created_at ?? "").getTime(),
       );

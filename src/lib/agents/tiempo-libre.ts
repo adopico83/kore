@@ -69,7 +69,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Tiempo libre." };
   }
@@ -80,7 +80,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const person = String(a.person ?? "");
       const activity = String(a.activity ?? "").trim();
       if (!person || !activity) throw new Error("Faltan person o activity en tiempo libre.");
-      const created = await addLeisureActivity({
+      const created = await addLeisureActivity(familyId, {
         person,
         activity,
         date: a.date ? String(a.date) : undefined,
@@ -90,7 +90,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     }
     case "get_leisure_activities": {
       const person = a.person as string | undefined;
-      const activities = await getLeisureActivities(person);
+      const activities = await getLeisureActivities(familyId, person);
       return { ok: true, activities };
     }
     case "log_personal_time": {
@@ -98,11 +98,11 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const description = String(a.description ?? "").trim();
       const minutes = Number(a.minutes);
       if (!person || !description || Number.isNaN(minutes)) throw new Error("Datos inválidos para log_personal_time.");
-      const created = await logPersonalTime(person, description, minutes);
+      const created = await logPersonalTime(familyId, person, description, minutes);
       return { ok: true, log: created };
     }
     case "get_balance_summary": {
-      const st = await getLeisureActivities();
+      const st = await getLeisureActivities(familyId);
       let anderM = 0;
       let leireM = 0;
       for (const ac of st) {

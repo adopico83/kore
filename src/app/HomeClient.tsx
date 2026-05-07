@@ -19,29 +19,27 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DomainHistoryEntry } from "@/components/DomainModal";
 import {
-  addCalendarEvent,
-  addDomainHistory,
   ANDER_ID,
-  deleteCalendarEvent,
-  getCalendarEvents,
-  getDomainHistory,
-  getDomains,
-  getExpenses,
-  getHealthRecords,
-  getKoreNotes,
-  getPendingCleaningTasks,
-  getProfiles,
-  getShoppingItems,
-  getSleepLogs,
-  getWeeklyMenu,
   LEIRE_ID,
-  updateCalendarEvent,
-  updateDomain,
-  updateStressLevel,
   type CalendarEventRow,
   type Domain as KoreDomainRow,
   type Expense,
 } from "@/lib/kore-db";
+import { getProfiles, updateStressLevel } from "@/lib/actions/profiles";
+import {
+  getCalendarEvents,
+  addCalendarEvent,
+  updateCalendarEvent,
+  deleteCalendarEvent,
+} from "@/lib/actions/calendar";
+import { getHealthRecords } from "@/lib/actions/health";
+import { getExpenses } from "@/lib/actions/expenses";
+import { getKoreNotes } from "@/lib/actions/corcho";
+import { getDomains, updateDomain, addDomainHistory, getDomainHistory } from "@/lib/actions/domains";
+import { getShoppingItems } from "@/lib/actions/shopping";
+import { getPendingCleaningTasks } from "@/lib/actions/cleaning";
+import { getWeeklyMenu } from "@/lib/actions/menu";
+import { getSleepLogs } from "@/lib/actions/sleep";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { saludFromHealthRecords } from "@/lib/kore-salud-sync";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";

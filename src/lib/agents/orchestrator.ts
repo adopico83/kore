@@ -38,12 +38,12 @@ for (const agent of subagents) {
 /** Todas las herramientas OpenAI de los 11 subagentes. */
 export const allTools = subagents.flatMap((s) => s.tools);
 
-export async function executeTool(toolName: string, args: unknown): Promise<unknown> {
+export async function executeTool(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   const agent = toolToAgent.get(toolName);
   if (!agent) {
     return { error: `No hay ningún subagente que ejecute la herramienta "${toolName}".` };
   }
-  return agent.execute(toolName, args);
+  return agent.execute(toolName, args, familyId);
 }
 
 /** Prompt de sistema del ORC con memorias insertadas. */

@@ -3,7 +3,8 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { addExpense, ANDER_ID, deleteExpense, getExpenses, LEIRE_ID, type Expense } from "@/lib/kore-db";
+import { addExpense, deleteExpense, getExpenses } from "@/lib/actions/expenses";
+import { ANDER_ID, LEIRE_ID, type Expense } from "@/lib/kore-db";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 

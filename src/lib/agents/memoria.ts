@@ -69,7 +69,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Memoria." };
   }
@@ -81,11 +81,11 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const value = String(a.value ?? "").trim();
       const category = String(a.category ?? "sugerencia");
       if (!key || !value) return { error: "Faltan key o value." };
-      await upsertAgentMemory(key, value, category);
+      await upsertAgentMemory(familyId, key, value, category);
       return { ok: true, key, category };
     }
     case "get_patterns": {
-      const rows = await getAgentMemory();
+      const rows = await getAgentMemory(familyId);
       const cat = a.category ? String(a.category) : null;
       const filtered = cat ? rows.filter((r) => r.category === cat) : rows;
       return { ok: true, patterns: filtered };
@@ -96,13 +96,13 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       if (!insight) return { error: "Falta insight." };
       const key = `${INSIGHT_PREFIX}${Date.now()}`;
       const value = JSON.stringify({ insight, context, at: new Date().toISOString() });
-      await upsertAgentMemory(key, value, "sugerencia");
+      await upsertAgentMemory(familyId, key, value, "sugerencia");
       return { ok: true, key };
     }
     case "get_relevant_memories": {
       const ctx = String(a.context ?? "").trim().toLowerCase();
       if (!ctx) return { error: "Falta context." };
-      const rows = await getAgentMemory();
+      const rows = await getAgentMemory(familyId);
       const relevant = rows.filter(
         (r) =>
           r.key.toLowerCase().includes(ctx) ||

@@ -2,7 +2,8 @@
 
 import { Play, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getKoreNotes, LEIRE_ID } from "@/lib/kore-db";
+import { getKoreNotes } from "@/lib/actions/corcho";
+import { LEIRE_ID } from "@/lib/kore-db";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 type FeedMessage = {

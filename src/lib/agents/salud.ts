@@ -210,7 +210,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Salud." };
   }
@@ -241,7 +241,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
         hora,
         lugar,
       });
-      const row = await addHealthRecord(insert);
+      const row = await addHealthRecord(familyId, insert);
       console.log("[salud] add_appointment output", row);
       return { ok: true, record: row };
     }
@@ -258,7 +258,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
         frecuenciaHoras: frec,
         proximaToma: nextDose,
       });
-      const row = await addHealthRecord(insert);
+      const row = await addHealthRecord(familyId, insert);
       return { ok: true, record: row };
     }
     case "log_medication_given": {
@@ -266,7 +266,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const medName = String(a.medication ?? "").trim().toLowerCase();
       const timeNote = String(a.time ?? "").trim();
       if (!patient || !medName) return { error: "Faltan campos." };
-      const rows = await getHealthRecords();
+      const rows = await getHealthRecords(familyId);
       const cand = rows.filter((r) => {
         if (r.type !== "medication") return false;
         const m = memberForPatientId(r.patient_id);
@@ -281,13 +281,13 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       const target = cand[0];
       if (!target) return { error: "No se encontró medicación coincidente." };
       const next = new Date(Date.now() + 8 * 3600000).toISOString();
-      await updateHealthRecord(target.id, {
+      await updateHealthRecord(familyId, target.id, {
         next_dose_at: next,
       });
       return { ok: true, updated_id: target.id, logged_at: timeNote, next_dose_at: next };
     }
     case "get_health_records": {
-      const rows = await getHealthRecords();
+      const rows = await getHealthRecords(familyId);
       const patient = a.patient ? asMember(String(a.patient)) : null;
       if (patient) {
         const pid = patientIdForMember(patient);
@@ -298,13 +298,13 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     case "complete_appointment": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await updateHealthRecord(id, { status: "completed" });
+      await updateHealthRecord(familyId, id, { status: "completed" });
       return { ok: true, id };
     }
     case "delete_health_record": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await deleteHealthRecord(id);
+      await deleteHealthRecord(familyId, id);
       return { ok: true, deleted: id };
     }
     default:

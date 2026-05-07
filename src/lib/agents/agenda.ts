@@ -173,7 +173,7 @@ function normalizeDate(rawDate: string): string | null {
   return null;
 }
 
-export async function execute(toolName: string, args: unknown): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Agenda." };
   }
@@ -206,14 +206,14 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
         console.warn("[agenda] add_calendar_event created_by vacío, se forzará ANDER_ID");
         row.created_by = ANDER_ID;
       }
-      const created = await addCalendarEvent(row);
+      const created = await addCalendarEvent(familyId, row);
       console.log("[agenda] add_calendar_event output", created);
       return { ok: true, event: created };
     }
     case "get_calendar_events": {
       const from = (a.from_date as string | undefined)?.slice(0, 10);
       const to = (a.to_date as string | undefined)?.slice(0, 10);
-      let rows = await getCalendarEvents();
+      let rows = await getCalendarEvents(familyId);
       if (from) rows = rows.filter((r) => r.date >= from);
       if (to) rows = rows.filter((r) => r.date <= to);
       return { ok: true, events: rows };
@@ -221,7 +221,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
     case "delete_calendar_event": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await deleteCalendarEvent(id);
+      await deleteCalendarEvent(familyId, id);
       return { ok: true, deleted: id };
     }
     case "get_upcoming_events": {
@@ -233,7 +233,7 @@ export async function execute(toolName: string, args: unknown): Promise<unknown>
       end.setDate(end.getDate() + days);
       const fromStr = iso(today);
       const toStr = iso(end);
-      const rows = await getCalendarEvents();
+      const rows = await getCalendarEvents(familyId);
       const filtered = rows.filter((r) => r.date >= fromStr && r.date <= toStr);
       return { ok: true, days, events: filtered };
     }
