@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
 import { completeOnboardingAction } from "@/lib/actions/onboarding";
@@ -83,6 +83,7 @@ async function parseFamilyPeople(input: string): Promise<{ partnerName: string; 
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const lastProcessedStep = useRef(0);
   const [mode, setMode] = useState<OnboardingMode>("none");
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: "init", role: "assistant", content: INITIAL_MESSAGE },
@@ -97,22 +98,14 @@ export default function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (mode === "none") {
+      lastProcessedStep.current = 0;
+    }
+  }, [mode]);
+
   const showModeButtons = mode === "none";
   const showGuidedChecklist = mode === "guided" && guidedStep === 2;
-
-  const guidedPrompt = useMemo(() => {
-    if (mode !== "guided") return "";
-    if (guidedStep === 1) {
-      return "Pregunta 1/4: ¿Cómo os llamáis y cómo se llaman vuestros hijos? Pueden ser uno o varios, o ninguno de momento.";
-    }
-    if (guidedStep === 2) {
-      return "Pregunta 2/4: ¿Qué dominios queréis activar ahora?";
-    }
-    if (guidedStep === 3) {
-      return "Pregunta 3/4: ¿A qué hora soléis cenar y cuáles son las rutinas de sueño en casa?";
-    }
-    return "";
-  }, [guidedStep, mode]);
 
   const appendUser = (content: string) =>
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content }]);
@@ -121,6 +114,7 @@ export default function OnboardingPage() {
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content }]);
 
   const startNewborn = () => {
+    lastProcessedStep.current = 0;
     setMode("newborn");
     appendAssistant(
       "Perfecto. ¿Cómo os llamáis y cómo se llaman vuestros hijos?\nPueden ser uno o varios, o ninguno de momento",
@@ -128,6 +122,8 @@ export default function OnboardingPage() {
   };
 
   const startGuided = () => {
+    if (lastProcessedStep.current === 1) return;
+    lastProcessedStep.current = 1;
     setMode("guided");
     setGuidedStep(1);
     appendAssistant(
@@ -195,17 +191,20 @@ export default function OnboardingPage() {
 
     try {
       if (guidedStep === 1) {
+        if (lastProcessedStep.current >= 2) return;
         const text = inputValue.trim();
         if (!text) return;
         appendUser(text);
         setInputValue("");
         setGuidedAnswers((prev) => ({ ...prev, familyPeople: text }));
         setGuidedStep(2);
+        lastProcessedStep.current = 2;
         appendAssistant("Pregunta 2/4: Seleccionad los dominios que queréis activar ahora.");
         return;
       }
 
       if (guidedStep === 2) {
+        if (lastProcessedStep.current >= 3) return;
         if (guidedAnswers.selectedDomains.length === 0) {
           setError("Selecciona al menos un dominio para continuar.");
           return;
@@ -213,11 +212,14 @@ export default function OnboardingPage() {
         setError("");
         appendUser(`Dominios elegidos: ${guidedAnswers.selectedDomains.join(", ")}`);
         setGuidedStep(3);
+        lastProcessedStep.current = 3;
         appendAssistant("Pregunta 3/4: ¿A qué hora soléis cenar y cuáles son las rutinas de sueño en casa?");
         return;
       }
 
       if (guidedStep !== 3) return;
+
+      if (lastProcessedStep.current >= 4) return;
 
       const routineText = inputValue.trim();
       if (!routineText) return;
@@ -245,6 +247,7 @@ export default function OnboardingPage() {
 
       setGuidedAnswers((prev) => ({ ...prev, routineInfo: routineText }));
       setGuidedStep(4);
+      lastProcessedStep.current = 4;
       appendAssistant("Pregunta 4/4: Perfecto, ya está configurado. Vamos a vuestra home.");
       router.replace("/");
       router.refresh();
@@ -299,22 +302,6 @@ export default function OnboardingPage() {
               {msg.content}
             </div>
           ))}
-          {guidedPrompt && mode === "guided" && guidedStep <= 3 ? (
-            <div
-              style={{
-                alignSelf: "flex-start",
-                maxWidth: "92%",
-                borderRadius: "12px 12px 12px 4px",
-                background: "#161a22",
-                border: "1px solid rgba(255,255,255,0.14)",
-                padding: "10px 12px",
-                whiteSpace: "pre-wrap",
-                lineHeight: 1.45,
-              }}
-            >
-              {guidedPrompt}
-            </div>
-          ) : null}
         </div>
 
         {showModeButtons ? (
