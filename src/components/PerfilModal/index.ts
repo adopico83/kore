@@ -5,5 +5,4 @@ export type {
   PerfilModalProps,
   PerfilNavigateTipo,
   PerfilSaludSlice,
-  PerfilUsuario,
 } from "./PerfilModal";

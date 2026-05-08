@@ -20,6 +20,7 @@ import {
 export default async function Home() {
   console.log("PAGE.TSX EJECUTÁNDOSE");
   const supabase = await createClient();
+  let familyName = "";
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -35,9 +36,10 @@ export default async function Home() {
     if (profile?.family_id) {
       const { data: family } = await supabase
         .from("families")
-        .select("onboarding_step")
+        .select("onboarding_step, name")
         .eq("id", profile.family_id)
         .single();
+      familyName = family?.name ?? "";
 
       console.log("USER:", user?.id);
       console.log("PROFILE:", profile);
@@ -55,6 +57,8 @@ export default async function Home() {
   if (!familyId) {
     return (
       <HomeClient
+        currentUserId={user?.id ?? ""}
+        familyName={familyName}
         initialProfiles={[]}
         initialDomains={[]}
         initialCalendarEvents={[]}
@@ -98,6 +102,8 @@ export default async function Home() {
 
   return (
     <HomeClient
+      currentUserId={user?.id ?? ""}
+      familyName={familyName}
       initialProfiles={initialProfiles}
       initialDomains={initialDomains}
       initialCalendarEvents={initialCalendarEvents}

@@ -5,8 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 import { getBrowserClient } from "@/lib/supabase/client";
-
-export type PerfilUsuario = "Ander" | "Leire";
+import type { Profile } from "@/lib/kore-db";
 
 export type PerfilNavigateTipo = "domain" | "salud";
 
@@ -32,7 +31,7 @@ export type PerfilSaludSlice = {
 };
 
 export type PerfilModalProps = {
-  usuario: PerfilUsuario;
+  usuario: Profile;
   onClose: () => void;
   domains: PerfilDomainRow[];
   saludMember: PerfilSaludSlice;
@@ -62,10 +61,6 @@ function clampStress(n: number): number {
   return Math.min(10, Math.max(1, Math.round(n)));
 }
 
-function nombreCompleto(usuario: PerfilUsuario): string {
-  return usuario === "Ander" ? "Ander Dopico" : "Leire Gómez";
-}
-
 function parseCitaDate(fecha: string, hora: string): number {
   const f = (fecha ?? "").trim();
   const h = (hora ?? "").trim();
@@ -74,16 +69,16 @@ function parseCitaDate(fecha: string, hora: string): number {
   return Number.isNaN(ms) ? Number.POSITIVE_INFINITY : ms;
 }
 
-function misDominios(domains: PerfilDomainRow[], usuario: PerfilUsuario): PerfilDomainRow[] {
-  return domains.filter((d) => d.owner === usuario);
+function misDominios(domains: PerfilDomainRow[], profileName: string): PerfilDomainRow[] {
+  return domains.filter((d) => d.owner === profileName);
 }
 
 function misTareas(
   domains: PerfilDomainRow[],
-  usuario: PerfilUsuario,
+  profileName: string,
   max: number,
 ): Array<{ text: string; emoji: string; name: string; domainId: string }> {
-  const owned = domains.filter((d) => d.owner === usuario);
+  const owned = domains.filter((d) => d.owner === profileName);
   const out: Array<{ text: string; emoji: string; name: string; domainId: string }> = [];
   for (const d of owned) {
     const notes = d.notes ?? [];
@@ -147,8 +142,8 @@ export function PerfilModal({
   const barColor = stressBarColor(stress);
   const avatarBorder = stressAvatarBorder(stress);
 
-  const dominios = useMemo(() => misDominios(domainRows, usuario), [domainRows, usuario]);
-  const tareas = useMemo(() => misTareas(domainRows, usuario, 5), [domainRows, usuario]);
+  const dominios = useMemo(() => misDominios(domainRows, usuario.name), [domainRows, usuario.name]);
+  const tareas = useMemo(() => misTareas(domainRows, usuario.name, 5), [domainRows, usuario.name]);
   const citas = useMemo(() => proximasCitas(citasRows, 5), [citasRows]);
 
   const navRowBg = (key: string) =>
@@ -162,7 +157,7 @@ export function PerfilModal({
     onStressChange(next);
   };
 
-  const initial = usuario === "Ander" ? "A" : "L";
+  const initial = usuario.name.charAt(0).toUpperCase();
   const handleSignOut = async () => {
     await getBrowserClient().auth.signOut();
     router.push("/login");
@@ -172,7 +167,7 @@ export function PerfilModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`Perfil de ${usuario}`}
+      aria-label={`Perfil de ${usuario.name}`}
       style={{
         position: "fixed",
         inset: 0,
@@ -229,7 +224,7 @@ export function PerfilModal({
             {initial}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: TEXT }}>{nombreCompleto(usuario)}</p>
+            <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: TEXT }}>{usuario.name}</p>
           </div>
           <button
             type="button"
@@ -402,7 +397,7 @@ export function PerfilModal({
                     <li key={c.id} style={{ margin: 0, padding: 0 }}>
                       <button
                         type="button"
-                        onClick={() => onNavigate("salud", usuario)}
+                        onClick={() => onNavigate("salud", usuario.id)}
                         onMouseEnter={() => setHoverNavKey(hk)}
                         onMouseLeave={() => setHoverNavKey(null)}
                         style={{

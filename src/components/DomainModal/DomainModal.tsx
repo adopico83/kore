@@ -11,7 +11,6 @@ import {
   getShoppingItems,
 } from "@/lib/actions/shopping";
 import {
-  ANDER_ID,
   type ShoppingItemRow,
 } from "@/lib/kore-db";
 
@@ -28,6 +27,8 @@ export type DomainHistoryEntry = { id: string; at: string; text: string };
 
 export type DomainModalProps = {
   domain: DomainItem;
+  members: string[];
+  actorId?: string;
   onClose: () => void;
   onSave: (next: Pick<DomainItem, "owner" | "state" | "notes">) => void | Promise<void>;
   /** Historial remoto (Supabase). Si no se pasa, se usa `localStorage` como antes. */
@@ -47,7 +48,15 @@ function isComprasDomainName(name: string): boolean {
   return name.trim().toLowerCase() === "compras";
 }
 
-export function DomainModal({ domain, onClose, onSave, historyEntries, historyReadOnly }: DomainModalProps) {
+export function DomainModal({
+  domain,
+  members,
+  actorId,
+  onClose,
+  onSave,
+  historyEntries,
+  historyReadOnly,
+}: DomainModalProps) {
   useEscapeKey(onClose);
   const isCompras = isComprasDomainName(domain.name);
 
@@ -147,7 +156,8 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
     const name = newShoppingName.trim();
     if (!name) return;
     try {
-      await addShoppingItem({ name, created_by: ANDER_ID });
+      if (!actorId) return;
+      await addShoppingItem({ name, created_by: actorId });
       emitKoreUpdate(["shopping_items"]);
       setNewShoppingName("");
       await loadShoppingItems();
@@ -177,6 +187,7 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
   };
 
   const notesToSave = isCompras ? (domain.notes ?? []) : notes;
+  const ownerOptions = useMemo(() => [...members, "Sin asignar"], [members]);
 
   return (
     <div
@@ -230,7 +241,7 @@ export function DomainModal({ domain, onClose, onSave, historyEntries, historyRe
         <section style={cardStyle}>
           <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Lo lleva:</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(["Ander", "Leire", "Sin asignar"] as const).map((name) => (
+            {ownerOptions.map((name) => (
               <button
                 key={name}
                 type="button"

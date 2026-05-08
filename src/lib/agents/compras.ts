@@ -91,11 +91,24 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       const category = String(a.category ?? "otro");
       const priority = String(a.priority ?? "media");
       if (!name) throw new Error("Falta name para añadir a compras.");
+      const actorId =
+        (typeof a.actorId === "string" && a.actorId.trim()) ||
+        (Array.isArray(a.initialProfiles)
+          ? String(
+              (
+                a.initialProfiles.find(
+                  (p) => p && typeof p === "object" && typeof (p as { id?: unknown }).id === "string",
+                ) as { id?: string } | undefined
+              )?.id ?? "",
+            ).trim()
+          : "") ||
+        "";
       const item = await addShoppingItem(familyId, {
         name,
         quantity: a.quantity != null ? String(a.quantity) : undefined,
         category,
         priority,
+        created_by: actorId,
       });
       return { ok: true, item };
     }

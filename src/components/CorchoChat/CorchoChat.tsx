@@ -136,9 +136,10 @@ function ConvRow({
 
 export type CorchoChatProps = {
   onClose: () => void;
+  recipientName: string;
 };
 
-export function CorchoChat({ onClose }: CorchoChatProps) {
+export function CorchoChat({ onClose, recipientName }: CorchoChatProps) {
   useEscapeKey(onClose);
   const [mensaje, setMensaje] = useState("");
   const [conversationId, setConversationId] = useState("");
@@ -394,7 +395,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
       style={{ position: "fixed", inset: 0, zIndex: 8000, display: "flex", flexDirection: "column", background: BG }}
       role="dialog"
       aria-modal="true"
-      aria-label="Mensajes con Leire"
+      aria-label={`Mensajes con ${recipientName}`}
     >
       <input
         ref={fileInputRef}
@@ -407,7 +408,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
       />
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.08)", padding: 12 }}>
         <div style={{ display: "flex", minWidth: 0, flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>Mensajes con Leire</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{`Mensajes con ${recipientName}`}</span>
           <button type="button" onClick={nuevaConversacion} {...touchEnd(nuevaConversacion)} style={btnGhost}>
             Nuevo
           </button>
@@ -451,7 +452,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
           </ul>
         ) : historial.length === 0 && !transcribiendo ? (
           <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", padding: 12, color: "rgba(255,255,255,0.75)" }}>
-            Escribe a Leire.
+            {`Escribe a ${recipientName}...`}
           </div>
         ) : (
           <>
@@ -530,7 +531,7 @@ export function CorchoChat({ onClose }: CorchoChatProps) {
             }
           }}
           rows={3}
-          placeholder="Escribe un mensaje..."
+          placeholder={`Escribe a ${recipientName}...`}
           style={{ width: "100%", resize: "none", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", color: "#fff", padding: "8px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
         />
         <div style={{ display: "flex", minHeight: 44, alignItems: "stretch", gap: 8 }}>

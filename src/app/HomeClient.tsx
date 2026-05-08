@@ -5,9 +5,9 @@ import { CorchoChat } from "@/components/CorchoChat";
 import { CorchoHistorial } from "@/components/CorchoHistorial";
 import { DomainModal, type DomainItem } from "@/components/DomainModal";
 import { EconomiaModal, type ExpenseItem } from "@/components/EconomiaModal";
-import { PerfilModal, type PerfilNavigateTipo, type PerfilUsuario } from "@/components/PerfilModal";
+import { PerfilModal, type PerfilCitaRow, type PerfilNavigateTipo } from "@/components/PerfilModal";
 import { SaludResumenModal } from "@/components/SaludResumenModal";
-import { SaludModal, type SaludData } from "@/components/SaludModal";
+import { SaludModal } from "@/components/SaludModal";
 import {
   CalendarModal,
   type CalendarEventDraft,
@@ -48,11 +48,8 @@ import { getPendingCleaningTasks } from "@/lib/actions/cleaning";
 import { getWeeklyMenu } from "@/lib/actions/menu";
 import { getSleepLogs } from "@/lib/actions/sleep";
 import { useKoreRealtime } from "@/lib/kore-realtime";
-import { saludFromHealthRecords } from "@/lib/kore-salud-sync";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
-
-/** Usuario activo (hardcodeado hasta auth). */
-const CURRENT_USER_ID = "00000000-0000-0000-0000-000000000001";
+import { getFamilyContext } from "@/lib/family-utils";
 
 function avatarStressBorder(level: number): string {
   if (level >= 8) return "#10b981";
@@ -185,14 +182,14 @@ type DomainCard = {
 };
 
 const DOMAINS: DomainCard[] = [
-  { id: "menu", name: "Menú", owner: "Ander", weight: 8, emoji: "🍽️", state: "En curso", line: "#4CC9A0", notes: ["Revisar nevera"] },
-  { id: "sueno", name: "Sueño", owner: "Leire", weight: 15, emoji: "😴", state: "Prioritario", line: "#9B8FE8", notes: ["Acostar antes de 23:00"] },
-  { id: "limpieza", name: "Limpieza", owner: "Leire", weight: 5, emoji: "🧹", state: "OK", line: "#EF9F27", notes: ["Baño principal"] },
-  { id: "compras", name: "Compras", owner: "Ander", weight: 4, emoji: "🛒", state: "Pendiente", line: "#4CC9A0", notes: ["Falta fruta"] },
+  { id: "menu", name: "Menú", owner: "Sin asignar", weight: 8, emoji: "🍽️", state: "En curso", line: "#4CC9A0", notes: ["Revisar nevera"] },
+  { id: "sueno", name: "Sueño", owner: "Sin asignar", weight: 15, emoji: "😴", state: "Prioritario", line: "#9B8FE8", notes: ["Acostar antes de 23:00"] },
+  { id: "limpieza", name: "Limpieza", owner: "Sin asignar", weight: 5, emoji: "🧹", state: "OK", line: "#EF9F27", notes: ["Baño principal"] },
+  { id: "compras", name: "Compras", owner: "Sin asignar", weight: 4, emoji: "🛒", state: "Pendiente", line: "#4CC9A0", notes: ["Falta fruta"] },
   {
     id: "colegio",
     name: "Colegio",
-    owner: "Leire",
+    owner: "Sin asignar",
     weight: 6,
     emoji: "🎒",
     state: "Excursión 15 mayo",
@@ -213,21 +210,19 @@ const DOMAINS: DomainCard[] = [
   },
 ];
 
-const CORCHO_MESSAGES: CorchoMessage[] = [
-  { who: "Leire", avatar: "L", ownerColor: "#f59e0b", text: "Te dejo un audio sobre la reunión del cole.", when: "Hace 12 min" },
-  { who: "Ander", avatar: "A", ownerColor: "#10b981", text: "¿Puedes recoger pan antes de las 19:00?", when: "Ayer 21:40" },
-  { who: "Leire", avatar: "L", ownerColor: "#f59e0b", text: "Mañana revisamos menú de la semana.", when: "Ayer 20:15" },
-];
+const CORCHO_MESSAGES: CorchoMessage[] = [];
 
 type CorchoMessage = {
-  who: "Ander" | "Leire";
-  avatar: "A" | "L";
+  who: string;
+  avatar: string;
   ownerColor: string;
   text: string;
   when: string;
 };
 
 type HomeClientProps = {
+  currentUserId: string;
+  familyName: string;
   initialProfiles: Profile[];
   initialDomains: KoreDomainRow[];
   initialCalendarEvents: CalendarEventRow[];
@@ -240,13 +235,62 @@ type HomeClientProps = {
   initialSleepLogs: SleepLogRow[];
 };
 
-function mapKoreNotesToCorchoMessages(rows: KoreNote[]): CorchoMessage[] {
+type MemberHealthData = {
+  citas: PerfilCitaRow[];
+  medicaciones: PerfilCitaRow[];
+};
+
+type DynamicSaludData = Record<string, MemberHealthData>;
+
+function emptyHealthMember(): MemberHealthData {
+  return { citas: [], medicaciones: [] };
+}
+
+function mapHealthRowsToDynamicSalud(rows: HealthRecord[]): DynamicSaludData {
+  const out: DynamicSaludData = {};
+  for (const r of rows) {
+    if (!r.patient_id) continue;
+    if (!out[r.patient_id]) out[r.patient_id] = emptyHealthMember();
+
+    if (r.type === "appointment" && (r.date_time ?? "").trim()) {
+      const raw = r.date_time ?? "";
+      const [fecha, horaRaw] = raw.includes("T") ? raw.split("T") : [raw, ""];
+      out[r.patient_id].citas.push({
+        id: r.id,
+        descripcion: r.description ?? "",
+        fecha: fecha ?? "",
+        hora: (horaRaw ?? "").slice(0, 5),
+        lugar: "",
+      });
+    }
+
+    if (r.type === "medication" && (r.next_dose_at ?? "").trim()) {
+      const raw = r.next_dose_at ?? "";
+      const [fecha, horaRaw] = raw.includes("T") ? raw.split("T") : [raw, ""];
+      out[r.patient_id].medicaciones.push({
+        id: r.id,
+        descripcion: r.description ?? "",
+        fecha: fecha ?? "",
+        hora: (horaRaw ?? "").slice(0, 5),
+        lugar: "",
+      });
+    }
+  }
+  return out;
+}
+
+function mapKoreNotesToCorchoMessages(rows: KoreNote[], profiles: Profile[]): CorchoMessage[] {
+  const colorByIndex = ["#4CC9A0", "#9B8FE8", "#EF9F27", "#E05555"];
+  const indexByProfileId = new Map(profiles.map((p, idx) => [p.id, idx]));
   return rows.slice(0, 3).map((r) => {
-    const who = r.sender_id === LEIRE_ID ? "Leire" : "Ander";
+    const sender = profiles.find((p) => p.id === r.sender_id) ?? null;
+    const who = sender?.name ?? "Desconocido";
+    const avatar = who.charAt(0).toUpperCase() || "?";
+    const colorIdx = indexByProfileId.get(sender?.id ?? "") ?? 0;
     return {
       who,
-      avatar: who === "Leire" ? "L" : "A",
-      ownerColor: who === "Leire" ? "#f59e0b" : "#10b981",
+      avatar,
+      ownerColor: colorByIndex[colorIdx % colorByIndex.length],
       text: r.content ?? "(nota sin texto)",
       when: new Date(r.created_at ?? "").toLocaleString("es-ES"),
     };
@@ -262,26 +306,26 @@ function calendarRowToEvent(row: CalendarEventRow): KoreAgendaEvent {
   };
 }
 
-function mapExpenseRowToItem(row: Expense): ExpenseItem {
+function mapExpenseRowToItem(row: Expense, profiles: Profile[]): ExpenseItem {
   const allowed: ExpenseItem["category"][] = ["comida", "hogar", "salud", "ocio", "transporte", "otros"];
   const category = (allowed.includes(row.category as ExpenseItem["category"])
     ? row.category
     : "otros") as ExpenseItem["category"];
+  const payer = profiles.find((p) => p.id === row.payer_id) ?? null;
   return {
     id: row.id,
     desc: row.description,
     amount: row.amount,
     category,
-    paidBy: row.payer_id === LEIRE_ID ? "Leire" : "Ander",
+    paidBy: payer?.id ?? row.payer_id ?? "",
     shared: row.is_shared ?? false,
     at: row.created_at ?? "",
   };
 }
 
-function mergedDomainCard(row: KoreDomainRow): DomainCard {
+function mergedDomainCard(row: KoreDomainRow, profiles: Profile[]): DomainCard {
   const def = DOMAINS.find((d) => d.name === row.name);
-  const owner =
-    row.owner_id === ANDER_ID ? "Ander" : row.owner_id === LEIRE_ID ? "Leire" : "Sin asignar";
+  const owner = profiles.find((p) => p.id === row.owner_id)?.name ?? "Sin asignar";
   return {
     id: row.id,
     name: row.name,
@@ -365,6 +409,8 @@ function withinAgendaWindow(dateIso: string, now = new Date()): boolean {
 }
 
 export function HomeClient({
+  currentUserId,
+  familyName,
   initialProfiles,
   initialDomains,
   initialCalendarEvents,
@@ -376,6 +422,8 @@ export function HomeClient({
   initialWeeklyMenu,
   initialSleepLogs,
 }: HomeClientProps) {
+  console.log("PROFILES RECIBIDOS:", initialProfiles.map((p) => p.name));
+  const [line1, line2] = familyName.split(/[-\/\s]/, 2);
   const [showAgent, setShowAgent] = useState(false);
   const [showCorcho, setShowCorcho] = useState(false);
   const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
@@ -383,7 +431,7 @@ export function HomeClient({
   const [showSalud, setShowSalud] = useState(false);
   const [showSaludResumen, setShowSaludResumen] = useState(false);
   const [showPerfil, setShowPerfil] = useState(false);
-  const [usuarioPerfil, setUsuarioPerfil] = useState<PerfilUsuario>("Ander");
+  const [usuarioPerfil, setUsuarioPerfil] = useState<Profile | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>(
@@ -401,7 +449,10 @@ export function HomeClient({
     const mapped = activeInitialDomains.map((row) =>
       enrichSuenoDomain(
         enrichLimpiezaDomain(
-          enrichMenuDomain(enrichComprasDomainFromShoppingItems(mergedDomainCard(row), initialShoppingItems), initialWeeklyMenu),
+          enrichMenuDomain(
+            enrichComprasDomainFromShoppingItems(mergedDomainCard(row, initialProfiles), initialShoppingItems),
+            initialWeeklyMenu,
+          ),
           initialPendingCleaningTasks,
         ),
         initialSleepLogs,
@@ -410,17 +461,17 @@ export function HomeClient({
     return mergeDomainsWithFallback(mapped, DOMAINS);
   });
   const [corchoMessages, setCorchoMessages] = useState<CorchoMessage[]>(
-    mapKoreNotesToCorchoMessages(initialKoreNotes),
+    mapKoreNotesToCorchoMessages(initialKoreNotes, initialProfiles),
   );
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
   const [healthOpen, setHealthOpen] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseItem[]>(
     initialExpenses
-      .map(mapExpenseRowToItem)
+      .map((row) => mapExpenseRowToItem(row, initialProfiles))
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
   );
-  const [salud, setSalud] = useState<SaludData>(() => {
+  const [salud, setSalud] = useState<DynamicSaludData>(() => {
     const filtered = initialHealthRecords.filter((r) => {
       const active = r.status === "active" || r.status === "pending";
       if (!active) return false;
@@ -428,27 +479,25 @@ export function HomeClient({
       if (r.type === "medication") return Boolean((r.next_dose_at ?? "").trim());
       return false;
     });
-    return saludFromHealthRecords(filtered) as SaludData;
+    return mapHealthRowsToDynamicSalud(filtered);
   });
-  const [anderStress, setAnderStress] = useState(() => {
-    const a = initialProfiles.find((p) => p.id === ANDER_ID);
-    return Math.min(10, Math.max(1, Math.round(a?.stress_level ?? 5)));
-  });
-  const [leireStress, setLeireStress] = useState(() => {
-    const l = initialProfiles.find((p) => p.id === LEIRE_ID);
-    return Math.min(10, Math.max(1, Math.round(l?.stress_level ?? 5)));
-  });
+  const [stressByProfileId, setStressByProfileId] = useState<Record<string, number>>(() =>
+    Object.fromEntries(initialProfiles.map((p) => [p.id, Math.min(10, Math.max(1, Math.round(p.stress_level ?? 5)))])),
+  );
+
+  const familyContext = useMemo(
+    () => getFamilyContext(initialProfiles, currentUserId),
+    [initialProfiles, currentUserId],
+  );
 
   const loadProfiles = useCallback(async () => {
     try {
       const profiles = await getProfiles();
-      const a = profiles.find((p) => p.id === ANDER_ID);
-      const l = profiles.find((p) => p.id === LEIRE_ID);
-      if (a) setAnderStress(Math.min(10, Math.max(1, Math.round(a.stress_level ?? 0))));
-      if (l) setLeireStress(Math.min(10, Math.max(1, Math.round(l.stress_level ?? 0))));
+      setStressByProfileId(
+        Object.fromEntries(profiles.map((p) => [p.id, Math.min(10, Math.max(1, Math.round(p.stress_level ?? 5)))])),
+      );
     } catch {
-      setAnderStress(5);
-      setLeireStress(5);
+      setStressByProfileId((prev) => prev);
     }
   }, []);
 
@@ -465,7 +514,10 @@ export function HomeClient({
       const mapped = activeRows.map((row) =>
         enrichSuenoDomain(
           enrichLimpiezaDomain(
-            enrichMenuDomain(enrichComprasDomainFromShoppingItems(mergedDomainCard(row), shoppingItems), weeklyMenu),
+            enrichMenuDomain(
+              enrichComprasDomainFromShoppingItems(mergedDomainCard(row, initialProfiles), shoppingItems),
+              weeklyMenu,
+            ),
             cleaningTasks,
           ),
           sleepLogs,
@@ -492,7 +544,9 @@ export function HomeClient({
   const loadExpenses = useCallback(async () => {
     try {
       const rows = await getExpenses();
-      const mapped = rows.map(mapExpenseRowToItem).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      const mapped = rows
+        .map((row) => mapExpenseRowToItem(row, initialProfiles))
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
       setExpenses(mapped);
     } catch {
       setExpenses([]);
@@ -509,40 +563,31 @@ export function HomeClient({
         if (r.type === "medication") return Boolean((r.next_dose_at ?? "").trim());
         return false;
       });
-      setSalud(saludFromHealthRecords(filtered) as SaludData);
+      setSalud(mapHealthRowsToDynamicSalud(filtered));
     } catch {
-      setSalud({
-        Peque: { citas: [], medicaciones: [] },
-        Ander: { citas: [], medicaciones: [] },
-        Leire: { citas: [], medicaciones: [] },
-      });
+      setSalud({});
     }
   }, []);
 
   const loadCorcho = useCallback(async () => {
     try {
       const rows = await getKoreNotes();
-      const mapped: CorchoMessage[] = rows.slice(0, 3).map((r) => {
-        const who = r.sender_id === LEIRE_ID ? "Leire" : "Ander";
-        return {
-          who,
-          avatar: who === "Leire" ? "L" : "A",
-          ownerColor: who === "Leire" ? "#f59e0b" : "#10b981",
-          text: r.content ?? "(nota sin texto)",
-          when: new Date(r.created_at ?? "").toLocaleString("es-ES"),
-        };
-      });
+      const mapped = mapKoreNotesToCorchoMessages(rows, initialProfiles);
       setCorchoMessages(
         mapped.length > 0
           ? mapped
           : initialKoreNotes.length > 0
-            ? mapKoreNotesToCorchoMessages(initialKoreNotes)
+            ? mapKoreNotesToCorchoMessages(initialKoreNotes, initialProfiles)
             : CORCHO_MESSAGES,
       );
     } catch {
-      setCorchoMessages(initialKoreNotes.length > 0 ? mapKoreNotesToCorchoMessages(initialKoreNotes) : CORCHO_MESSAGES);
+      setCorchoMessages(
+        initialKoreNotes.length > 0
+          ? mapKoreNotesToCorchoMessages(initialKoreNotes, initialProfiles)
+          : CORCHO_MESSAGES,
+      );
     }
-  }, [initialKoreNotes]);
+  }, [initialKoreNotes, initialProfiles]);
 
   const handleCloseAgentChat = useCallback(() => {
     setShowAgent(false);
@@ -623,6 +668,8 @@ export function HomeClient({
   );
   const economia = useMemo(() => {
     const now = new Date();
+    const adults = familyContext.adults;
+    const adultIds = adults.map((a) => a.id);
     const monthItems = expenses.filter((it) => {
       const d = new Date(it.at);
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
@@ -630,29 +677,24 @@ export function HomeClient({
     const totalMes = monthItems.reduce((acc, it) => acc + Math.abs(it.amount), 0);
     const sharedItems = expenses.filter((it) => it.shared);
     const totalShared = sharedItems.reduce((acc, it) => acc + Math.abs(it.amount), 0);
-    const paidAnder = sharedItems
-      .filter((it) => it.paidBy === "Ander")
-      .reduce((acc, it) => acc + Math.abs(it.amount), 0);
-    const paidLeire = sharedItems
-      .filter((it) => it.paidBy === "Leire")
-      .reduce((acc, it) => acc + Math.abs(it.amount), 0);
-    const half = totalShared / 2;
+    const paidByAdult = Object.fromEntries(adultIds.map((id) => [id, 0])) as Record<string, number>;
+    for (const item of sharedItems) {
+      if (paidByAdult[item.paidBy] != null) {
+        paidByAdult[item.paidBy] += Math.abs(item.amount);
+      }
+    }
+    const split = adults.length > 0 ? totalShared / adults.length : 0;
+    const debtByAdult = Object.fromEntries(
+      adultIds.map((id) => [id, Math.max(0, split - (paidByAdult[id] ?? 0))]),
+    ) as Record<string, number>;
     return {
       totalMes,
-      debeAnder: Math.max(0, half - paidAnder),
-      debeLeire: Math.max(0, half - paidLeire),
+      debtByAdult,
     };
-  }, [expenses]);
-  const saludPendientes = useMemo(
-    () =>
-      salud.Peque.citas.length +
-      salud.Peque.medicaciones.length +
-      salud.Ander.citas.length +
-      salud.Ander.medicaciones.length +
-      salud.Leire.citas.length +
-      salud.Leire.medicaciones.length,
-    [salud],
-  );
+  }, [expenses, familyContext.adults]);
+  const saludPendientes = useMemo(() => {
+    return Object.values(salud).reduce((acc, member) => acc + member.citas.length + member.medicaciones.length, 0);
+  }, [salud]);
 
   const sortAgendaEvents = useCallback((list: KoreAgendaEvent[]) => {
     return [...list].sort((a, b) => {
@@ -669,7 +711,7 @@ export function HomeClient({
           title: draft.titulo,
           date: draft.fecha,
           time: draft.hora?.trim().length ? draft.hora : "",
-          created_by: CURRENT_USER_ID,
+          created_by: familyContext.currentUser?.id ?? initialProfiles[0]?.id ?? "",
         });
         const ev = calendarRowToEvent(row);
         setAgendaEvents((prev) => {
@@ -730,14 +772,13 @@ export function HomeClient({
     if (!activeDomainName) return;
     const current = domains.find((d) => d.name === activeDomainName);
     if (!current) return;
-    const owner_id =
-      next.owner === "Ander" ? ANDER_ID : next.owner === "Leire" ? LEIRE_ID : null;
+    const owner_id = initialProfiles.find((p) => p.name === next.owner)?.id ?? null;
     const histText = `Owner: ${next.owner} · Estado: ${next.state || "Sin estado"}${
       next.notes.length ? ` · Nota: ${next.notes[next.notes.length - 1]}` : ""
     }`;
     try {
       await updateDomain(current.id, { owner_id });
-      await addDomainHistory(current.id, histText, CURRENT_USER_ID);
+      await addDomainHistory(current.id, histText, familyContext.currentUser?.id ?? currentUserId ?? "");
       const updated = domains.map((d) =>
         d.name === activeDomainName ? { ...d, owner: next.owner, state: next.state, notes: next.notes } : d,
       );
@@ -870,77 +911,67 @@ export function HomeClient({
             gap: 2,
           }}
         >
-          <p
-            style={{
-              margin: 0,
-              fontSize: 9,
-              fontFamily: "ui-monospace, monospace",
-              color: "rgba(228, 230, 237, 0.45)",
-              letterSpacing: "2px",
-              textAlign: "center",
-              textTransform: "uppercase",
-              lineHeight: 1.2,
-            }}
-          >
-            Dopico
-          </p>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 9,
-              fontFamily: "ui-monospace, monospace",
-              color: "rgba(228, 230, 237, 0.45)",
-              letterSpacing: "2px",
-              textAlign: "center",
-              textTransform: "uppercase",
-              lineHeight: 1.2,
-            }}
-          >
-            Gómez
-          </p>
+          {familyName ? (
+            <>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 9,
+                  fontFamily: "ui-monospace, monospace",
+                  color: "rgba(228, 230, 237, 0.45)",
+                  letterSpacing: "2px",
+                  textAlign: "center",
+                  textTransform: "uppercase",
+                  lineHeight: 1.2,
+                }}
+              >
+                {line1 ?? ""}
+              </p>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 9,
+                  fontFamily: "ui-monospace, monospace",
+                  color: "rgba(228, 230, 237, 0.45)",
+                  letterSpacing: "2px",
+                  textAlign: "center",
+                  textTransform: "uppercase",
+                  lineHeight: 1.2,
+                }}
+              >
+                {line2 ?? ""}
+              </p>
+            </>
+          ) : null}
         </div>
         <div style={{ display: "flex", alignItems: "center", flexShrink: 0, position: "relative" }}>
-          <button
-            type="button"
-            aria-label="Perfil de Ander"
-            onClick={() => {
-              setUsuarioPerfil("Ander");
-              setShowPerfil(true);
-            }}
-            style={{
-              ...avatarBase,
-              position: "relative",
-              zIndex: 1,
-              borderColor: avatarStressBorder(anderStress),
-              boxShadow: avatarStressShadow(anderStress),
-              cursor: "pointer",
-              padding: 0,
-              font: "inherit",
-            }}
-          >
-            A
-          </button>
-          <button
-            type="button"
-            aria-label="Perfil de Leire"
-            onClick={() => {
-              setUsuarioPerfil("Leire");
-              setShowPerfil(true);
-            }}
-            style={{
-              ...avatarBase,
-              position: "relative",
-              zIndex: 2,
-              borderColor: avatarStressBorder(leireStress),
-              boxShadow: avatarStressShadow(leireStress),
-              marginLeft: -10,
-              cursor: "pointer",
-              padding: 0,
-              font: "inherit",
-            }}
-          >
-            L
-          </button>
+          {familyContext.adults.slice(0, 2).map((profile, index) => {
+            const stress = stressByProfileId[profile.id] ?? 5;
+            return (
+              <button
+                key={profile.id}
+                type="button"
+                aria-label={`Perfil de ${profile.name}`}
+                onClick={() => {
+                  setUsuarioPerfil(profile);
+                  setShowPerfil(true);
+                }}
+                style={{
+                  ...avatarBase,
+                  position: "relative",
+                  zIndex: index + 1,
+                  borderColor: avatarStressBorder(stress),
+                  boxShadow: avatarStressShadow(stress),
+                  marginLeft: index === 0 ? 0 : -10,
+                  cursor: "pointer",
+                  padding: 0,
+                  font: "inherit",
+                }}
+              >
+                {profile.name.charAt(0).toUpperCase()}
+              </button>
+            );
+          })}
         </div>
       </header>
 
@@ -1544,12 +1575,13 @@ export function HomeClient({
                 gap: 12,
               }}
             >
-              {(["Peque", "Ander", "Leire"] as const).map((member) => {
-                const citas = salud[member].citas;
-                const meds = salud[member].medicaciones;
+              {[...familyContext.children, ...familyContext.adults].map((member) => {
+                const memberHealth = salud[member.id] ?? emptyHealthMember();
+                const citas = memberHealth.citas;
+                const meds = memberHealth.medicaciones;
                 return (
                   <div
-                    key={member}
+                    key={member.id}
                     onClick={() => setShowSaludResumen(true)}
                     style={{ cursor: "pointer" }}
                   >
@@ -1560,10 +1592,10 @@ export function HomeClient({
                         fontWeight: 700,
                         textTransform: "uppercase",
                         letterSpacing: "0.06em",
-                        color: member === "Peque" ? C.green : member === "Leire" ? C.amber : C.muted,
+                        color: member.role === "child" ? C.green : C.muted,
                       }}
                     >
-                      {member}
+                      {member.name}
                     </p>
                     {citas.length === 0 && meds.length === 0 ? (
                       <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Sin registros</p>
@@ -1588,8 +1620,6 @@ export function HomeClient({
                           </li>
                         ))}
                         {meds.map((m) => {
-                          const dt = m.proximaToma;
-                          const [f, t] = dt.includes("T") ? dt.split("T") : [dt, ""];
                           return (
                             <li
                               key={m.id}
@@ -1604,7 +1634,7 @@ export function HomeClient({
                               }}
                             >
                               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {f} {t} · {m.nombre} ({m.dosis})
+                                {m.fecha} {m.hora} · {m.descripcion}
                               </span>
                             </li>
                           );
@@ -1782,46 +1812,28 @@ export function HomeClient({
                 border: "0.5px solid rgba(255,255,255,0.06)",
               }}
             >
-              <div>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 10,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: C.muted,
-                  }}
-                >
-                  Debe Ander
-                </p>
-                <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700, color: C.green }}>
-                  {booting ? (
-                    <span style={{ display: "inline-block", width: 86, height: 12, borderRadius: 999, background: SKEL.bg }} />
-                  ) : (
-                    `${economia.debeAnder.toFixed(2).replace(".", ",")}€`
-                  )}
-                </p>
-              </div>
-              <div>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 10,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: C.muted,
-                  }}
-                >
-                  Debe Leire
-                </p>
-                <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700, color: C.green }}>
-                  {booting ? (
-                    <span style={{ display: "inline-block", width: 86, height: 12, borderRadius: 999, background: SKEL.bg }} />
-                  ) : (
-                    `${economia.debeLeire.toFixed(2).replace(".", ",")}€`
-                  )}
-                </p>
-              </div>
+              {familyContext.adults.map((adult) => (
+                <div key={adult.id}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: C.muted,
+                    }}
+                  >
+                    Debe {adult.name}
+                  </p>
+                  <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700, color: C.green }}>
+                    {booting ? (
+                      <span style={{ display: "inline-block", width: 86, height: 12, borderRadius: 999, background: SKEL.bg }} />
+                    ) : (
+                      `${(economia.debtByAdult[adult.id] ?? 0).toFixed(2).replace(".", ",")}€`
+                    )}
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1893,7 +1905,7 @@ export function HomeClient({
             setShowCorchoHistorial(false);
             setShowCorcho(true);
           }}
-          aria-label="Mensaje a Leire"
+          aria-label="Mensajes familiares"
           style={{
             width: 52,
             height: 52,
@@ -1939,46 +1951,68 @@ export function HomeClient({
         </button>
       </nav>
 
-      {showCorcho ? <CorchoChat onClose={() => setShowCorcho(false)} /> : null}
+      {showCorcho ? (
+        <CorchoChat
+          onClose={() => setShowCorcho(false)}
+          recipientName={familyContext.adults.find((p) => p.id !== currentUserId)?.name ?? "tu pareja"}
+        />
+      ) : null}
       {showCorchoHistorial ? <CorchoHistorial onClose={() => setShowCorchoHistorial(false)} /> : null}
       {showAgent ? <AgentChat onClose={handleCloseAgentChat} /> : null}
       {showEconomia ? (
         <EconomiaModal
           onClose={() => setShowEconomia(false)}
+          members={familyContext.adults}
           onChange={(items) => setExpenses(items)}
         />
       ) : null}
       {showSalud ? (
         <SaludModal
           onClose={() => setShowSalud(false)}
-          onChange={(next) => setSalud(next)}
+          profiles={initialProfiles}
+          onChange={(next) => {
+            const mapped: DynamicSaludData = {};
+            for (const profile of initialProfiles) {
+              const legacy = next[profile.id];
+              if (!legacy) continue;
+              mapped[profile.id] = {
+                citas: (legacy.citas ?? []).map((c) => ({ ...c })),
+                medicaciones: (legacy.medicaciones ?? []).map((m) => ({
+                  id: m.id,
+                  descripcion: `${m.nombre} ${m.dosis}`.trim(),
+                  fecha: (m.proximaToma ?? "").split("T")[0] ?? "",
+                  hora: ((m.proximaToma ?? "").split("T")[1] ?? "").slice(0, 5),
+                  lugar: "",
+                })),
+              };
+            }
+            setSalud(mapped);
+          }}
         />
       ) : null}
       {showSaludResumen ? (
         <SaludResumenModal
           onClose={() => setShowSaludResumen(false)}
-          onChange={(next) => setSalud(next)}
+          onChange={() => void loadSalud()}
         />
       ) : null}
-      {showPerfil ? (
+      {showPerfil && usuarioPerfil ? (
         <PerfilModal
           usuario={usuarioPerfil}
           onClose={() => setShowPerfil(false)}
           domains={domains}
-          saludMember={salud[usuarioPerfil]}
-          stressLevel={usuarioPerfil === "Ander" ? anderStress : leireStress}
+          saludMember={salud[usuarioPerfil.id] ?? emptyHealthMember()}
+          stressLevel={stressByProfileId[usuarioPerfil.id] ?? 5}
           onStressChange={(n) => {
-            const perfil = usuarioPerfil;
-            const uid = perfil === "Ander" ? ANDER_ID : LEIRE_ID;
+            const profileId = usuarioPerfil.id;
             void (async () => {
               try {
-                await updateStressLevel(uid, n);
+                await updateStressLevel(profileId, n);
                 emitKoreUpdate(["profiles"]);
               } catch {
                 /* Supabase no disponible: mismo estado local + LS */
               }
-              if (perfil === "Ander") setAnderStress(n);
-              else setLeireStress(n);
+              setStressByProfileId((prev) => ({ ...prev, [profileId]: n }));
             })();
           }}
           onNavigate={handlePerfilNavigate}
@@ -1994,6 +2028,8 @@ export function HomeClient({
             emoji: activeDomain.emoji,
             notes: activeDomain.notes ?? [],
           }}
+          members={familyContext.adults.map((p) => p.name)}
+          actorId={familyContext.currentUser?.id ?? currentUserId}
           onClose={() => setActiveDomainName(null)}
           onSave={handleSaveDomain}
           historyEntries={domainHistoryList}
