@@ -16,9 +16,18 @@ import ReactMarkdown from "react-markdown";
 import { emitKoreUpdate, type KoreTable } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
-const LS_INDEX = "kore_orc_conv_index";
-const lsMsgsKey = (id: string) => `kore_orc_msgs_${id}`;
-const LS_ACTIVE = "kore_orc_active_conv";
+const lsIndexKey = (uid: string) => {
+  if (!uid) throw new Error("ID de usuario requerido para el chat");
+  return `kore_orc_conv_index_${uid}`;
+};
+const lsMsgsKey = (uid: string, cid: string) => {
+  if (!uid) throw new Error("ID de usuario requerido para el chat");
+  return `kore_orc_msgs_${uid}_${cid}`;
+};
+const lsActiveKey = (uid: string) => {
+  if (!uid) throw new Error("ID de usuario requerido para el chat");
+  return `kore_orc_active_conv_${uid}`;
+};
 
 const toolToTable: Record<string, KoreTable[]> = {
   // Agenda
@@ -143,10 +152,10 @@ function generateConversationId() {
   return `conv_${Date.now()}`;
 }
 
-function readConvIndex(): ConvMeta[] {
+function readConvIndex(currentUserId: string): ConvMeta[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(LS_INDEX);
+    const raw = localStorage.getItem(lsIndexKey(currentUserId));
     if (!raw) return [];
     const p = JSON.parse(raw) as ConvMeta[];
     return Array.isArray(p) ? p : [];
@@ -155,18 +164,18 @@ function readConvIndex(): ConvMeta[] {
   }
 }
 
-function writeConvIndex(list: ConvMeta[]) {
+function writeConvIndex(currentUserId: string, list: ConvMeta[]) {
   try {
-    localStorage.setItem(LS_INDEX, JSON.stringify(list.slice(0, 20)));
+    localStorage.setItem(lsIndexKey(currentUserId), JSON.stringify(list.slice(0, 20)));
   } catch {
     /* ignore */
   }
 }
 
-function readMsgs(cid: string): ChatMessage[] {
+function readMsgs(currentUserId: string, cid: string): ChatMessage[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(lsMsgsKey(cid));
+    const raw = localStorage.getItem(lsMsgsKey(currentUserId, cid));
     if (!raw) return [];
     const p = JSON.parse(raw) as ChatMessage[];
     return Array.isArray(p) ? p : [];
@@ -175,9 +184,9 @@ function readMsgs(cid: string): ChatMessage[] {
   }
 }
 
-function writeMsgs(cid: string, msgs: ChatMessage[]) {
+function writeMsgs(currentUserId: string, cid: string, msgs: ChatMessage[]) {
   try {
-    localStorage.setItem(lsMsgsKey(cid), JSON.stringify(msgs));
+    localStorage.setItem(lsMsgsKey(currentUserId, cid), JSON.stringify(msgs));
   } catch {
     /* ignore */
   }
@@ -498,9 +507,12 @@ function ConvRow({
 
 export type AgentChatProps = {
   onClose: () => void;
+  currentUserId: string;
 };
 
-export function AgentChat({ onClose }: AgentChatProps) {
+export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
+  if (!currentUserId || currentUserId === "") return null;
+
   useEscapeKey(onClose);
   const [fechaRelativaAnchorMs, setFechaRelativaAnchorMs] = useState<number | null>(null);
   const [mensaje, setMensaje] = useState("");
@@ -529,53 +541,69 @@ export function AgentChat({ onClose }: AgentChatProps) {
   }, []);
 
   const persistMessages = useCallback((cid: string, msgs: ChatMessage[]) => {
-    writeMsgs(cid, msgs);
-  }, []);
+    writeMsgs(currentUserId, cid, msgs);
+  }, [currentUserId]);
 
   const persistIndex = useCallback((list: ConvMeta[]) => {
-    writeConvIndex(list);
+    writeConvIndex(currentUserId, list);
     setConversaciones(list);
-  }, []);
+  }, [currentUserId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const idx = readConvIndex();
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (!key.startsWith("kore_orc_")) continue;
+        if (key.includes("__") || key.endsWith("_")) {
+          keysToRemove.push(key);
+        }
+      }
+      for (const key of keysToRemove) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      /* ignore */
+    }
+    const idx = readConvIndex(currentUserId);
     setConversaciones(idx);
-    const savedActive = localStorage.getItem(LS_ACTIVE)?.trim();
+    const savedActive = localStorage.getItem(lsActiveKey(currentUserId))?.trim();
     const pick =
       (savedActive && idx.some((c) => c.conversation_id === savedActive) ? savedActive : null) ??
       idx[0]?.conversation_id ??
       generateConversationId();
     setConversationId(pick);
-    setHistorial(readMsgs(pick));
+    setHistorial(readMsgs(currentUserId, pick));
     if (!idx.length) {
       const first: ConvMeta = {
         conversation_id: pick,
         titulo: "Nueva conversación",
         created_at: new Date().toISOString(),
-        total_mensajes: readMsgs(pick).length,
+        total_mensajes: readMsgs(currentUserId, pick).length,
       };
       persistIndex([first]);
     } else {
       try {
-        localStorage.setItem(LS_ACTIVE, pick);
+        localStorage.setItem(lsActiveKey(currentUserId), pick);
       } catch {
         /* ignore */
       }
     }
     setHydrated(true);
-  }, [persistIndex]);
+  }, [persistIndex, currentUserId]);
 
   useEffect(() => {
     if (!hydrated || !conversationId) return;
     try {
-      localStorage.setItem(LS_ACTIVE, conversationId);
+      localStorage.setItem(lsActiveKey(currentUserId), conversationId);
     } catch {
       /* ignore */
     }
     persistMessages(conversationId, historial);
 
-    const idx = readConvIndex();
+    const idx = readConvIndex(currentUserId);
     const rawTitulo = historial.find((m) => m.role === "user")?.content.trim() ?? "";
     const titulo =
       rawTitulo.length > 60 ? `${rawTitulo.slice(0, 60)}…` : rawTitulo || "Nueva conversación";
@@ -599,9 +627,9 @@ export function AgentChat({ onClose }: AgentChatProps) {
           },
           ...idx,
         ].slice(0, 20);
-    writeConvIndex(next);
+    writeConvIndex(currentUserId, next);
     setConversaciones(next);
-  }, [historial, conversationId, hydrated, persistMessages]);
+  }, [historial, conversationId, hydrated, persistMessages, currentUserId]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -850,11 +878,11 @@ export function AgentChat({ onClose }: AgentChatProps) {
       created_at: new Date().toISOString(),
       total_mensajes: 0,
     };
-    const prev = readConvIndex();
+    const prev = readConvIndex(currentUserId);
     persistIndex([meta, ...prev.filter((c) => c.conversation_id !== next)].slice(0, 20));
-    writeMsgs(next, []);
+    writeMsgs(currentUserId, next, []);
     try {
-      localStorage.setItem(LS_ACTIVE, next);
+      localStorage.setItem(lsActiveKey(currentUserId), next);
     } catch {
       /* ignore */
     }
@@ -867,19 +895,19 @@ export function AgentChat({ onClose }: AgentChatProps) {
     }
     setConversationId(cid);
     setPanelHistorial(false);
-    setHistorial(readMsgs(cid));
+    setHistorial(readMsgs(currentUserId, cid));
     try {
-      localStorage.setItem(LS_ACTIVE, cid);
+      localStorage.setItem(lsActiveKey(currentUserId), cid);
     } catch {
       /* ignore */
     }
   };
 
   const confirmarEliminarConversacion = (cid: string) => {
-    const nextList = readConvIndex().filter((c) => c.conversation_id !== cid);
+    const nextList = readConvIndex(currentUserId).filter((c) => c.conversation_id !== cid);
     persistIndex(nextList);
     try {
-      localStorage.removeItem(lsMsgsKey(cid));
+      localStorage.removeItem(lsMsgsKey(currentUserId, cid));
     } catch {
       /* ignore */
     }

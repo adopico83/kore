@@ -71,12 +71,13 @@ function expenseRowToItem(row: Expense, members: Profile[]): ExpenseItem {
 
 export type EconomiaModalProps = {
   onClose: () => void;
-  members: Profile[];
+  members?: Profile[];
   onChange?: (items: ExpenseItem[]) => void;
 };
 
-export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps) {
+export function EconomiaModal({ onClose, members = [], onChange }: EconomiaModalProps) {
   useEscapeKey(onClose);
+  const safeMembers = members ?? [];
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -86,7 +87,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
   const [desc, setDesc] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState<ExpenseItem["category"]>("hogar");
-  const [paidBy, setPaidBy] = useState<ExpenseItem["paidBy"]>(() => members[0]?.id ?? "");
+  const [paidBy, setPaidBy] = useState<ExpenseItem["paidBy"]>(() => safeMembers[0]?.id ?? "");
   const [shared, setShared] = useState(true);
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
         const rows = await getExpenses();
         if (cancelled) return;
         const mapped = rows
-          .map((row) => expenseRowToItem(row, members))
+          .map((row) => expenseRowToItem(row, safeMembers))
           .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
         setItems(mapped);
         onChangeRef.current?.(mapped);
@@ -112,7 +113,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
     return () => {
       cancelled = true;
     };
-  }, [members]);
+  }, [safeMembers]);
 
   const balance = useMemo(() => {
     const now = new Date();
@@ -123,18 +124,18 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
     const totalMes = monthItems.reduce((acc, it) => acc + Math.abs(it.amount), 0);
     const sharedItems = items.filter((it) => it.shared);
     const totalShared = sharedItems.reduce((acc, it) => acc + Math.abs(it.amount), 0);
-    const paidByMember = Object.fromEntries(members.map((m) => [m.id, 0])) as Record<string, number>;
+    const paidByMember = Object.fromEntries(safeMembers.map((m) => [m.id, 0])) as Record<string, number>;
     for (const item of sharedItems) {
       if (paidByMember[item.paidBy] != null) paidByMember[item.paidBy] += Math.abs(item.amount);
     }
-    const split = members.length > 0 ? totalShared / members.length : 0;
+    const split = safeMembers.length > 0 ? totalShared / safeMembers.length : 0;
     return {
       totalMes,
       debtByMember: Object.fromEntries(
-        members.map((m) => [m.id, Math.max(0, split - (paidByMember[m.id] ?? 0))]),
+        safeMembers.map((m) => [m.id, Math.max(0, split - (paidByMember[m.id] ?? 0))]),
       ) as Record<string, number>,
     };
-  }, [items, members]);
+  }, [items, safeMembers]);
 
   const updateItemsLocal = (next: ExpenseItem[]) => {
     const sorted = next.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
@@ -148,7 +149,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
     const parsedAmount = parseFloat(amount.replace(",", "."));
     if (!cleanDesc) return;
     if (!amount.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0) return;
-    const payer = members.find((m) => m.id === paidBy);
+    const payer = safeMembers.find((m) => m.id === paidBy);
     if (!payer?.id) return;
     try {
       const created = await addExpense({
@@ -159,7 +160,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
         is_shared: shared,
         source: "manual",
       });
-      const item = expenseRowToItem(created, members);
+      const item = expenseRowToItem(created, safeMembers);
       const next = [item, ...items].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
       setItems(next);
       onChange?.(next);
@@ -180,7 +181,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
     setDesc("");
     setAmount("");
     setCategory("hogar");
-    setPaidBy(members[0]?.id ?? "");
+    setPaidBy(safeMembers[0]?.id ?? "");
     setShared(true);
   };
 
@@ -231,7 +232,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
             <p style={{ margin: 0, fontSize: 11, color: "rgba(228,230,237,0.6)" }}>Total mes</p>
             <p style={{ margin: "6px 0 0", color: "#E05555", fontWeight: 700 }}>{toCurrency(balance.totalMes)}</p>
           </div>
-          {members.slice(0, 2).map((member) => (
+          {(safeMembers ?? []).slice(0, 2).map((member) => (
             <div key={member.id}>
               <p style={{ margin: 0, fontSize: 11, color: "rgba(228,230,237,0.6)" }}>Debe {member.name}</p>
               <p style={{ margin: "6px 0 0", color: "#4CC9A0", fontWeight: 700 }}>
@@ -255,7 +256,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
               <option value="otros" style={{ color: "#111318", background: "#e4e6ed" }}>Otros</option>
             </select>
             <div style={{ display: "flex", gap: 8 }}>
-              {members.map((member) => (
+              {(safeMembers ?? []).map((member) => (
                 <button key={member.id} type="button" onClick={() => setPaidBy(member.id)} style={{ flex: 1, borderRadius: 999, border: paidBy === member.id ? "1px solid #4CC9A0" : "1px solid rgba(255,255,255,0.15)", background: paidBy === member.id ? "rgba(76,201,160,0.2)" : "rgba(255,255,255,0.04)", color: "#e4e6ed", padding: "6px 8px", cursor: "pointer" }}>
                   {member.name}
                 </button>
@@ -284,7 +285,7 @@ export function EconomiaModal({ onClose, members, onChange }: EconomiaModalProps
                       {categoryEmoji[item.category]} {item.desc} · <span style={{ color: "rgba(228,230,237,0.6)" }}>{fecha} {hora}</span> · <span style={{ color: "#E05555" }}>{toCurrency(item.amount)}</span>
                     </p>
                     <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>
-                      Paga: {members.find((m) => m.id === item.paidBy)?.name ?? "Desconocido"} · {item.shared ? "Compartido" : "Personal"}
+                      Paga: {safeMembers.find((m) => m.id === item.paidBy)?.name ?? "Desconocido"} · {item.shared ? "Compartido" : "Personal"}
                     </p>
                   </div>
                   <button type="button" onClick={() => void removeItem(item.id)} style={{ border: "none", background: "transparent", color: "rgba(228,230,237,0.65)", cursor: "pointer", flexShrink: 0 }}>

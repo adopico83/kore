@@ -136,10 +136,10 @@ function ConvRow({
 
 export type CorchoChatProps = {
   onClose: () => void;
-  recipientName: string;
+  recipientName?: string;
 };
 
-export function CorchoChat({ onClose, recipientName }: CorchoChatProps) {
+export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatProps) {
   useEscapeKey(onClose);
   const [mensaje, setMensaje] = useState("");
   const [conversationId, setConversationId] = useState("");

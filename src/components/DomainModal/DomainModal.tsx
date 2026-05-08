@@ -27,7 +27,7 @@ export type DomainHistoryEntry = { id: string; at: string; text: string };
 
 export type DomainModalProps = {
   domain: DomainItem;
-  members: string[];
+  members?: string[];
   actorId?: string;
   onClose: () => void;
   onSave: (next: Pick<DomainItem, "owner" | "state" | "notes">) => void | Promise<void>;
@@ -50,7 +50,7 @@ function isComprasDomainName(name: string): boolean {
 
 export function DomainModal({
   domain,
-  members,
+  members = [],
   actorId,
   onClose,
   onSave,
@@ -187,7 +187,8 @@ export function DomainModal({
   };
 
   const notesToSave = isCompras ? (domain.notes ?? []) : notes;
-  const ownerOptions = useMemo(() => [...members, "Sin asignar"], [members]);
+  const safeMembers = members ?? [];
+  const ownerOptions = useMemo(() => [...safeMembers, "Sin asignar"], [safeMembers]);
 
   return (
     <div

@@ -494,7 +494,7 @@ export async function addShoppingItem(
     quantity: data.quantity ?? null,
     category: data.category ?? null,
     priority: data.priority ?? null,
-    created_by: data.created_by ?? ANDER_ID,
+    created_by: data.created_by?.trim() || null,
     completed: false,
   };
   console.log("[kore-db] addShoppingItem payload", payload);

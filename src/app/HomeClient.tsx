@@ -280,10 +280,12 @@ function mapHealthRowsToDynamicSalud(rows: HealthRecord[]): DynamicSaludData {
 }
 
 function mapKoreNotesToCorchoMessages(rows: KoreNote[], profiles: Profile[]): CorchoMessage[] {
+  const safeRows = rows ?? [];
+  const safeProfiles = profiles ?? [];
   const colorByIndex = ["#4CC9A0", "#9B8FE8", "#EF9F27", "#E05555"];
-  const indexByProfileId = new Map(profiles.map((p, idx) => [p.id, idx]));
-  return rows.slice(0, 3).map((r) => {
-    const sender = profiles.find((p) => p.id === r.sender_id) ?? null;
+  const indexByProfileId = new Map(safeProfiles.map((p, idx) => [p.id, idx]));
+  return safeRows.slice(0, 3).map((r) => {
+    const sender = safeProfiles.find((p) => p.id === r.sender_id) ?? null;
     const who = sender?.name ?? "Desconocido";
     const avatar = who.charAt(0).toUpperCase() || "?";
     const colorIdx = indexByProfileId.get(sender?.id ?? "") ?? 0;
@@ -307,11 +309,12 @@ function calendarRowToEvent(row: CalendarEventRow): KoreAgendaEvent {
 }
 
 function mapExpenseRowToItem(row: Expense, profiles: Profile[]): ExpenseItem {
+  const safeProfiles = profiles ?? [];
   const allowed: ExpenseItem["category"][] = ["comida", "hogar", "salud", "ocio", "transporte", "otros"];
   const category = (allowed.includes(row.category as ExpenseItem["category"])
     ? row.category
     : "otros") as ExpenseItem["category"];
-  const payer = profiles.find((p) => p.id === row.payer_id) ?? null;
+  const payer = safeProfiles.find((p) => p.id === row.payer_id) ?? null;
   return {
     id: row.id,
     desc: row.description,
@@ -324,8 +327,9 @@ function mapExpenseRowToItem(row: Expense, profiles: Profile[]): ExpenseItem {
 }
 
 function mergedDomainCard(row: KoreDomainRow, profiles: Profile[]): DomainCard {
+  const safeProfiles = profiles ?? [];
   const def = DOMAINS.find((d) => d.name === row.name);
-  const owner = profiles.find((p) => p.id === row.owner_id)?.name ?? "Sin asignar";
+  const owner = safeProfiles.find((p) => p.id === row.owner_id)?.name ?? "Sin asignar";
   return {
     id: row.id,
     name: row.name,
@@ -411,18 +415,18 @@ function withinAgendaWindow(dateIso: string, now = new Date()): boolean {
 export function HomeClient({
   currentUserId,
   familyName,
-  initialProfiles,
-  initialDomains,
-  initialCalendarEvents,
-  initialExpenses,
-  initialHealthRecords,
-  initialKoreNotes,
-  initialShoppingItems,
-  initialPendingCleaningTasks,
-  initialWeeklyMenu,
-  initialSleepLogs,
+  initialProfiles = [],
+  initialDomains = [],
+  initialCalendarEvents = [],
+  initialExpenses = [],
+  initialHealthRecords = [],
+  initialKoreNotes = [],
+  initialShoppingItems = [],
+  initialPendingCleaningTasks = [],
+  initialWeeklyMenu = [],
+  initialSleepLogs = [],
 }: HomeClientProps) {
-  console.log("PROFILES RECIBIDOS:", initialProfiles.map((p) => p.name));
+  const safeInitialProfiles = useMemo(() => initialProfiles ?? [], [initialProfiles]);
   const [line1, line2] = familyName.split(/[-\/\s]/, 2);
   const [showAgent, setShowAgent] = useState(false);
   const [showCorcho, setShowCorcho] = useState(false);
@@ -435,7 +439,7 @@ export function HomeClient({
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>(
-    initialCalendarEvents
+    (initialCalendarEvents ?? [])
       .filter((row) => withinAgendaWindow((row.date ?? "").slice(0, 10)))
       .map(calendarRowToEvent),
   );
@@ -445,34 +449,34 @@ export function HomeClient({
   const [domainsOpen, setDomainsOpen] = useState(true);
   const [domainCardHover, setDomainCardHover] = useState<Record<string, boolean>>({});
   const [domains, setDomains] = useState<DomainCard[]>(() => {
-    const activeInitialDomains = initialDomains.filter((row) => row.is_active === true);
+    const activeInitialDomains = (initialDomains ?? []).filter((row) => row.is_active === true);
     const mapped = activeInitialDomains.map((row) =>
       enrichSuenoDomain(
         enrichLimpiezaDomain(
           enrichMenuDomain(
-            enrichComprasDomainFromShoppingItems(mergedDomainCard(row, initialProfiles), initialShoppingItems),
-            initialWeeklyMenu,
+            enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), initialShoppingItems ?? []),
+            initialWeeklyMenu ?? [],
           ),
-          initialPendingCleaningTasks,
+          initialPendingCleaningTasks ?? [],
         ),
-        initialSleepLogs,
+        initialSleepLogs ?? [],
       ),
     );
     return mergeDomainsWithFallback(mapped, DOMAINS);
   });
   const [corchoMessages, setCorchoMessages] = useState<CorchoMessage[]>(
-    mapKoreNotesToCorchoMessages(initialKoreNotes, initialProfiles),
+    mapKoreNotesToCorchoMessages(initialKoreNotes ?? [], safeInitialProfiles),
   );
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
   const [healthOpen, setHealthOpen] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseItem[]>(
-    initialExpenses
-      .map((row) => mapExpenseRowToItem(row, initialProfiles))
+    (initialExpenses ?? [])
+      .map((row) => mapExpenseRowToItem(row, safeInitialProfiles))
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
   );
   const [salud, setSalud] = useState<DynamicSaludData>(() => {
-    const filtered = initialHealthRecords.filter((r) => {
+    const filtered = (initialHealthRecords ?? []).filter((r) => {
       const active = r.status === "active" || r.status === "pending";
       if (!active) return false;
       if (r.type === "appointment") return Boolean((r.date_time ?? "").trim());
@@ -482,12 +486,12 @@ export function HomeClient({
     return mapHealthRowsToDynamicSalud(filtered);
   });
   const [stressByProfileId, setStressByProfileId] = useState<Record<string, number>>(() =>
-    Object.fromEntries(initialProfiles.map((p) => [p.id, Math.min(10, Math.max(1, Math.round(p.stress_level ?? 5)))])),
+    Object.fromEntries((safeInitialProfiles ?? []).map((p) => [p.id, Math.min(10, Math.max(1, Math.round(p.stress_level ?? 5)))])),
   );
 
   const familyContext = useMemo(
-    () => getFamilyContext(initialProfiles, currentUserId),
-    [initialProfiles, currentUserId],
+    () => getFamilyContext(safeInitialProfiles, currentUserId),
+    [safeInitialProfiles, currentUserId],
   );
 
   const loadProfiles = useCallback(async () => {
@@ -515,7 +519,7 @@ export function HomeClient({
         enrichSuenoDomain(
           enrichLimpiezaDomain(
             enrichMenuDomain(
-              enrichComprasDomainFromShoppingItems(mergedDomainCard(row, initialProfiles), shoppingItems),
+              enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), shoppingItems),
               weeklyMenu,
             ),
             cleaningTasks,
@@ -545,7 +549,7 @@ export function HomeClient({
     try {
       const rows = await getExpenses();
       const mapped = rows
-        .map((row) => mapExpenseRowToItem(row, initialProfiles))
+        .map((row) => mapExpenseRowToItem(row, safeInitialProfiles))
         .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
       setExpenses(mapped);
     } catch {
@@ -572,22 +576,22 @@ export function HomeClient({
   const loadCorcho = useCallback(async () => {
     try {
       const rows = await getKoreNotes();
-      const mapped = mapKoreNotesToCorchoMessages(rows, initialProfiles);
+      const mapped = mapKoreNotesToCorchoMessages(rows, safeInitialProfiles);
       setCorchoMessages(
         mapped.length > 0
           ? mapped
-          : initialKoreNotes.length > 0
-            ? mapKoreNotesToCorchoMessages(initialKoreNotes, initialProfiles)
+          : (initialKoreNotes ?? []).length > 0
+            ? mapKoreNotesToCorchoMessages(initialKoreNotes ?? [], safeInitialProfiles)
             : CORCHO_MESSAGES,
       );
     } catch {
       setCorchoMessages(
-        initialKoreNotes.length > 0
-          ? mapKoreNotesToCorchoMessages(initialKoreNotes, initialProfiles)
+        (initialKoreNotes ?? []).length > 0
+          ? mapKoreNotesToCorchoMessages(initialKoreNotes ?? [], safeInitialProfiles)
           : CORCHO_MESSAGES,
       );
     }
-  }, [initialKoreNotes, initialProfiles]);
+  }, [initialKoreNotes, safeInitialProfiles]);
 
   const handleCloseAgentChat = useCallback(() => {
     setShowAgent(false);
@@ -1954,25 +1958,27 @@ export function HomeClient({
       {showCorcho ? (
         <CorchoChat
           onClose={() => setShowCorcho(false)}
-          recipientName={familyContext.adults.find((p) => p.id !== currentUserId)?.name ?? "tu pareja"}
+          recipientName={(familyContext.adults ?? []).find((p) => p.id !== currentUserId)?.name ?? "tu pareja"}
         />
       ) : null}
       {showCorchoHistorial ? <CorchoHistorial onClose={() => setShowCorchoHistorial(false)} /> : null}
-      {showAgent ? <AgentChat onClose={handleCloseAgentChat} /> : null}
+      {showAgent && currentUserId ? (
+        <AgentChat onClose={handleCloseAgentChat} currentUserId={currentUserId} />
+      ) : null}
       {showEconomia ? (
         <EconomiaModal
           onClose={() => setShowEconomia(false)}
-          members={familyContext.adults}
+          members={familyContext.adults ?? []}
           onChange={(items) => setExpenses(items)}
         />
       ) : null}
       {showSalud ? (
         <SaludModal
           onClose={() => setShowSalud(false)}
-          profiles={initialProfiles}
+          profiles={safeInitialProfiles ?? []}
           onChange={(next) => {
             const mapped: DynamicSaludData = {};
-            for (const profile of initialProfiles) {
+            for (const profile of safeInitialProfiles ?? []) {
               const legacy = next[profile.id];
               if (!legacy) continue;
               mapped[profile.id] = {
@@ -2028,7 +2034,7 @@ export function HomeClient({
             emoji: activeDomain.emoji,
             notes: activeDomain.notes ?? [],
           }}
-          members={familyContext.adults.map((p) => p.name)}
+          members={(familyContext.adults ?? []).map((p) => p.name)}
           actorId={familyContext.currentUser?.id ?? currentUserId}
           onClose={() => setActiveDomainName(null)}
           onSave={handleSaveDomain}

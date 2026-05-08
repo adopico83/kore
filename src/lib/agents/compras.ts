@@ -92,6 +92,7 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       const priority = String(a.priority ?? "media");
       if (!name) throw new Error("Falta name para añadir a compras.");
       const actorId =
+        (typeof a.created_by === "string" && a.created_by.trim()) ||
         (typeof a.actorId === "string" && a.actorId.trim()) ||
         (Array.isArray(a.initialProfiles)
           ? String(

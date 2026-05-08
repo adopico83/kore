@@ -265,7 +265,16 @@ export default function OnboardingPage() {
           family_id: familyId,
           role: "member",
         }));
+        console.log("[onboarding] INSERT profiles pareja/hijos payload", {
+          familyId,
+          count: profileRows.length,
+          rows: profileRows,
+        });
         const { error: profileInsertError } = await supabase.from("profiles").insert(profileRows);
+        console.log("[onboarding] INSERT profiles pareja/hijos result", {
+          familyId,
+          error: profileInsertError?.message ?? null,
+        });
         if (profileInsertError) throw new Error(profileInsertError.message || "No se pudieron crear perfiles.");
       }
 

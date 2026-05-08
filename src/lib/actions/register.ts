@@ -58,6 +58,11 @@ export async function registerFamilyAction(
       })
       .select("id")
       .single();
+    console.log("[registerFamilyAction] INSERT families", {
+      familyName: normalizedFamilyName,
+      familyId: family?.id ?? null,
+      error: familyError?.message ?? null,
+    });
 
     if (familyError || !family?.id) {
       throw new Error(familyError?.message || "No se pudo crear la familia.");
@@ -68,6 +73,12 @@ export async function registerFamilyAction(
       name: normalizedOwnerName,
       family_id: family.id,
       role: "owner",
+    });
+    console.log("[registerFamilyAction] INSERT profiles owner", {
+      ownerId: createdUserId,
+      ownerName: normalizedOwnerName,
+      familyId: family.id,
+      error: profileError?.message ?? null,
     });
 
     if (profileError) {
@@ -92,6 +103,21 @@ export async function registerFamilyAction(
         is_active: false,
       })),
     );
+    console.log("[registerFamilyAction] INSERT domains base", {
+      familyId: family.id,
+      domainsCount: BASE_DOMAINS.length,
+      error: domainsError?.message ?? null,
+    });
+
+    // Pareja e hijos no se crean en el registro: se crean durante onboarding.
+    console.log("[registerFamilyAction] INSERT profiles pareja", {
+      skipped: true,
+      reason: "se crean en onboarding",
+    });
+    console.log("[registerFamilyAction] INSERT profiles hijos", {
+      skipped: true,
+      reason: "se crean en onboarding",
+    });
 
     if (domainsError) {
       throw new Error(domainsError.message || "No se pudieron crear los dominios base.");

@@ -5,8 +5,6 @@ import { applyGuardrails, type PlannedTool } from "@/lib/agent/guardrails";
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
 import { getScopedFamilyId } from "@/lib/family-context";
 import {
-  ANDER_ID,
-  LEIRE_ID,
   getAgentMemory,
   getPendingCleaningTasks,
   getProfiles,
@@ -99,6 +97,20 @@ function detectIntent(lastUserMsg: string): IntentType {
 
 function sanitizeArgs(args: unknown): Record<string, unknown> {
   return args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
+}
+
+function enrichToolArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+  profiles: Awaited<ReturnType<typeof getProfiles>>,
+): Record<string, unknown> {
+  if (toolName !== "add_shopping_item") return args;
+  const currentCreatedBy = typeof args.created_by === "string" ? args.created_by.trim() : "";
+  if (currentCreatedBy) return args;
+  const firstAdultId =
+    profiles.find((p) => p.role !== "child" && typeof p.id === "string" && p.id.trim())?.id ?? null;
+  if (!firstAdultId) return args;
+  return { ...args, created_by: firstAdultId };
 }
 
 function isReadTool(name: string): boolean {
@@ -225,11 +237,13 @@ export async function POST(request: NextRequest) {
       getPendingCleaningTasks(familyId),
     ]);
     const systemPrompt = buildSystemPrompt(memories);
-    const anderStress = profiles.find((p) => p.id === ANDER_ID)?.stress_level ?? 5;
-    const leireStress = profiles.find((p) => p.id === LEIRE_ID)?.stress_level ?? 5;
-    const energiaAnder = Math.max(1, Math.min(10, 10 - anderStress));
-    const energiaLeire = Math.max(1, Math.min(10, 10 - leireStress));
-    const energiaFamiliar = Math.round((energiaAnder + energiaLeire) / 2);
+    const adults = profiles.filter((p) => p.role !== "child");
+    const avgStress =
+      adults.length > 0
+        ? adults.reduce((acc, p) => acc + (Number.isFinite(p.stress_level) ? Number(p.stress_level) : 5), 0) /
+          adults.length
+        : 5;
+    const energiaFamiliar = Math.round(Math.max(1, Math.min(10, 10 - avgStress)));
     const tareasPendientes =
       shoppingItems.filter((item) => !item.completed).length + pendingCleaningTasks.length;
     const snapshotText = [
@@ -310,12 +324,13 @@ export async function POST(request: NextRequest) {
         for (const tc of calls) {
           if (tc.type !== "function") continue;
           const name = tc.function.name;
-          let args: unknown = {};
+          let args: Record<string, unknown> = {};
           try {
-            args = JSON.parse(tc.function.arguments || "{}");
+            args = sanitizeArgs(JSON.parse(tc.function.arguments || "{}"));
           } catch {
             args = {};
           }
+          args = enrichToolArgs(name, args, profiles);
           const signature = `${name}:${JSON.stringify(args)}`;
           if (executedCallSignatures.has(signature)) continue;
           executedCallSignatures.add(signature);
@@ -396,7 +411,8 @@ export async function POST(request: NextRequest) {
         let hasMutationSuccess = false;
 
         for (const step of executionQueue) {
-          const signature = `${step.tool}:${JSON.stringify(step.args)}`;
+          const stepArgs = enrichToolArgs(step.tool, step.args, profiles);
+          const signature = `${step.tool}:${JSON.stringify(stepArgs)}`;
           if (executedCallSignatures.has(signature)) {
             const duplicateResult = { error: "Tool duplicada evitada: ya se ejecutó en esta sesión con los mismos argumentos." };
             toolsExecuted.push({
@@ -413,7 +429,7 @@ export async function POST(request: NextRequest) {
           let success = false;
           let errorMessage: string | undefined;
           try {
-            result = await executeTool(step.tool, step.args, familyId);
+            result = await executeTool(step.tool, stepArgs, familyId);
             const normalized = normalizeToolResult(step.tool, result);
             success = normalized.success;
             errorMessage = normalized.error;
@@ -445,14 +461,15 @@ export async function POST(request: NextRequest) {
         // Sólo tras agotar todas las mutaciones. Lecturas opcionales al final (máx 1).
         if (reads.length > 0) {
           const readStep = reads[reads.length - 1];
-          const signature = `${readStep.tool}:${JSON.stringify(readStep.args)}`;
+          const readArgs = enrichToolArgs(readStep.tool, readStep.args, profiles);
+          const signature = `${readStep.tool}:${JSON.stringify(readArgs)}`;
           if (!executedCallSignatures.has(signature)) {
             executedCallSignatures.add(signature);
             let result: unknown;
             let success = false;
             let errorMessage: string | undefined;
             try {
-              result = await executeTool(readStep.tool, readStep.args, familyId);
+              result = await executeTool(readStep.tool, readArgs, familyId);
               const normalized = normalizeToolResult(readStep.tool, result);
               success = normalized.success;
               errorMessage = normalized.error;
