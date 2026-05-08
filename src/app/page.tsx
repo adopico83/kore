@@ -45,6 +45,7 @@ export default async function Home() {
       console.log("PROFILE:", profile);
       console.log("FAMILY:", family);
       console.log("ONBOARDING STEP:", family?.onboarding_step);
+      console.log("FAMILY ONBOARDING:", family?.onboarding_step);
 
       if (family?.onboarding_step === "pending") {
         redirect("/onboarding");

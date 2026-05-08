@@ -3,43 +3,25 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
+import { completeOnboardingAction } from "@/lib/actions/onboarding";
+import { parseFamilyPeopleForOnboarding } from "@/lib/actions/extract-family-members";
+import { BASE_DOMAINS, type DomainName } from "@/lib/domains-catalog";
 
 type ChatMessage = { id: string; role: "assistant" | "user"; content: string };
 type OnboardingMode = "none" | "newborn" | "guided";
 
 type GuidedAnswers = {
   familyPeople: string;
-  selectedDomains: string[];
+  selectedDomains: DomainName[];
   routineInfo: string;
-};
-
-const DOMAIN_DEFAULTS: Record<string, { agent: string; weight: number }> = {
-  Compras: { agent: "logistica", weight: 8 },
-  "Menú": { agent: "logistica", weight: 7 },
-  Limpieza: { agent: "armonia", weight: 6 },
-  Agenda: { agent: "logistica", weight: 9 },
-  Colegio: { agent: "logistica", weight: 7 },
-  "Economía": { agent: "logistica", weight: 6 },
-  "Sueño": { agent: "armonia", weight: 8 },
-  Ocio: { agent: "armonia", weight: 5 },
-  Mantenimiento: { agent: "logistica", weight: 4 },
-  Salud: { agent: "armonia", weight: 7 },
 };
 
 const INITIAL_MESSAGE = "Hola, soy Kore. He preparado vuestro espacio.\n¿Cómo empezamos?";
 
-const GUIDED_DOMAIN_OPTIONS = [
-  "Compras",
-  "Menú",
-  "Limpieza",
-  "Agenda",
-  "Colegio",
-  "Economía",
-  "Sueño",
-  "Ocio",
-  "Mantenimiento",
-  "Salud",
-] as const;
+const GUIDED_DOMAIN_OPTIONS = BASE_DOMAINS.map((domain) => domain.name) as DomainName[];
+const NEWBORN_CRITICAL_DOMAIN_OPTIONS = BASE_DOMAINS.filter((domain) => domain.isCritical).map(
+  (domain) => domain.name,
+) as DomainName[];
 
 async function getSessionContext() {
   const supabase = getBrowserClient();
@@ -58,19 +40,13 @@ async function getSessionContext() {
     throw new Error(profileError?.message || "No se pudo resolver la familia actual.");
   }
 
-  return { supabase, userId: user.id, familyId: profile.family_id };
+  return { familyId: profile.family_id };
 }
 
-async function completeOnboarding(familyId: string) {
-  const supabase = getBrowserClient();
-  const { error } = await supabase.from("families").update({ onboarding_step: "completed" }).eq("id", familyId);
-  if (error) throw new Error(error.message || "No se pudo completar el onboarding.");
-}
-
-async function ensureActiveDomains(familyId: string, names: string[]) {
+async function resolveDomainIdsByNames(familyId: string, names: string[]): Promise<string[]> {
   const supabase = getBrowserClient();
   const uniqueNames = Array.from(new Set(names));
-  if (uniqueNames.length === 0) return;
+  if (uniqueNames.length === 0) return [];
 
   const { data: existingRows, error: selectError } = await supabase
     .from("domains")
@@ -79,28 +55,12 @@ async function ensureActiveDomains(familyId: string, names: string[]) {
     .in("name", uniqueNames);
   if (selectError) throw new Error(selectError.message || "No se pudieron consultar dominios.");
 
-  const existingNames = new Set((existingRows ?? []).map((row) => row.name));
-  const missingNames = uniqueNames.filter((name) => !existingNames.has(name));
-
+  const idsByName = new Map((existingRows ?? []).map((row) => [row.name, row.id]));
+  const missingNames = uniqueNames.filter((name) => !idsByName.has(name));
   if (missingNames.length > 0) {
-    const { error: insertError } = await supabase.from("domains").insert(
-      missingNames.map((name) => ({
-        family_id: familyId,
-        name,
-        agent: DOMAIN_DEFAULTS[name]?.agent ?? "logistica",
-        weight: DOMAIN_DEFAULTS[name]?.weight ?? 5,
-        is_active: true,
-      })),
-    );
-    if (insertError) throw new Error(insertError.message || "No se pudieron crear dominios faltantes.");
+    throw new Error(`Faltan dominios base: ${missingNames.join(", ")}.`);
   }
-
-  const { error: updateError } = await supabase
-    .from("domains")
-    .update({ is_active: true })
-    .eq("family_id", familyId)
-    .in("name", uniqueNames);
-  if (updateError) throw new Error(updateError.message || "No se pudieron activar dominios.");
+  return uniqueNames.map((name) => idsByName.get(name)!).filter(Boolean);
 }
 
 async function saveMemory(familyId: string, key: string, value: string, category = "onboarding") {
@@ -115,6 +75,10 @@ async function saveMemory(familyId: string, key: string, value: string, category
     updated_at: now,
   });
   if (error) throw new Error(error.message || "No se pudo guardar memoria.");
+}
+
+async function parseFamilyPeople(input: string): Promise<{ partnerName: string; childrenNames: string[] }> {
+  return parseFamilyPeopleForOnboarding(input);
 }
 
 export default function OnboardingPage() {
@@ -185,7 +149,7 @@ export default function OnboardingPage() {
       const orcInstruction = [
         "Contexto onboarding recién nacido:",
         text,
-        "Activa los dominios Sueño, Salud, Compras y Menú.",
+        `Activa los dominios ${NEWBORN_CRITICAL_DOMAIN_OPTIONS.join(", ")}.`,
         "Guarda memoria relevante en agent_memory para el arranque de la familia.",
       ].join("\n");
 
@@ -197,9 +161,19 @@ export default function OnboardingPage() {
       const data = (await res.json().catch(() => ({}))) as { reply?: string; respuesta?: string; error?: string };
       if (!res.ok) throw new Error(data.error || "No se pudo contactar con ORC.");
 
-      await ensureActiveDomains(familyId, ["Sueño", "Salud", "Compras", "Menú"]);
+      const selectedDomainIds = await resolveDomainIdsByNames(familyId, NEWBORN_CRITICAL_DOMAIN_OPTIONS);
+      const { partnerName, childrenNames } = await parseFamilyPeople(text);
+      const result = await completeOnboardingAction({
+        familyId,
+        partnerName,
+        childrenNames,
+        selectedDomainIds,
+      });
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
       await saveMemory(familyId, "newborn_context", text, "onboarding");
-      await completeOnboarding(familyId);
 
       appendAssistant(
         (typeof data.reply === "string" && data.reply) ||
@@ -252,36 +226,22 @@ export default function OnboardingPage() {
       appendUser(routineText);
       setInputValue("");
 
-      const { supabase, familyId } = await getSessionContext();
-      const names = guidedAnswers.familyPeople
-        .split(/[,\n]/)
-        .map((token) => token.trim())
-        .filter(Boolean);
+      const { familyId } = await getSessionContext();
+      const selectedDomainIds = await resolveDomainIdsByNames(familyId, guidedAnswers.selectedDomains);
+      const { partnerName, childrenNames } = await parseFamilyPeople(guidedAnswers.familyPeople);
 
-      if (names.length > 0) {
-        const profileRows = names.map((name) => ({
-          id: crypto.randomUUID(),
-          name,
-          family_id: familyId,
-          role: "member",
-        }));
-        console.log("[onboarding] INSERT profiles pareja/hijos payload", {
-          familyId,
-          count: profileRows.length,
-          rows: profileRows,
-        });
-        const { error: profileInsertError } = await supabase.from("profiles").insert(profileRows);
-        console.log("[onboarding] INSERT profiles pareja/hijos result", {
-          familyId,
-          error: profileInsertError?.message ?? null,
-        });
-        if (profileInsertError) throw new Error(profileInsertError.message || "No se pudieron crear perfiles.");
+      const result = await completeOnboardingAction({
+        familyId,
+        partnerName,
+        childrenNames,
+        selectedDomainIds,
+      });
+      if (!result.success) {
+        setError(result.error);
+        return;
       }
-
-      await ensureActiveDomains(familyId, guidedAnswers.selectedDomains);
       await saveMemory(familyId, "guided_people", guidedAnswers.familyPeople, "onboarding");
       await saveMemory(familyId, "guided_routines", routineText, "onboarding");
-      await completeOnboarding(familyId);
 
       setGuidedAnswers((prev) => ({ ...prev, routineInfo: routineText }));
       setGuidedStep(4);

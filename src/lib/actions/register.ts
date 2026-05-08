@@ -1,18 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-
-const BASE_DOMAINS = [
-  { name: "Compras", agent: "logistica", weight: 8 },
-  { name: "Menú", agent: "logistica", weight: 7 },
-  { name: "Limpieza", agent: "armonia", weight: 6 },
-  { name: "Agenda", agent: "logistica", weight: 9 },
-  { name: "Colegio", agent: "logistica", weight: 7 },
-  { name: "Economía", agent: "logistica", weight: 6 },
-  { name: "Sueño", agent: "armonia", weight: 8 },
-  { name: "Ocio", agent: "armonia", weight: 5 },
-  { name: "Mantenimiento", agent: "logistica", weight: 4 },
-] as const;
+import { BASE_DOMAINS } from "@/lib/domains-catalog";
 
 function generateInviteCode(): string {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";

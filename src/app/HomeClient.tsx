@@ -50,6 +50,7 @@ import { getSleepLogs } from "@/lib/actions/sleep";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
 import { getFamilyContext } from "@/lib/family-utils";
+import { BASE_DOMAINS } from "@/lib/domains-catalog";
 
 function avatarStressBorder(level: number): string {
   if (level >= 8) return "#10b981";
@@ -181,34 +182,17 @@ type DomainCard = {
   notes?: string[];
 };
 
-const DOMAINS: DomainCard[] = [
-  { id: "menu", name: "Menú", owner: "Sin asignar", weight: 8, emoji: "🍽️", state: "En curso", line: "#4CC9A0", notes: ["Revisar nevera"] },
-  { id: "sueno", name: "Sueño", owner: "Sin asignar", weight: 15, emoji: "😴", state: "Prioritario", line: "#9B8FE8", notes: ["Acostar antes de 23:00"] },
-  { id: "limpieza", name: "Limpieza", owner: "Sin asignar", weight: 5, emoji: "🧹", state: "OK", line: "#EF9F27", notes: ["Baño principal"] },
-  { id: "compras", name: "Compras", owner: "Sin asignar", weight: 4, emoji: "🛒", state: "Pendiente", line: "#4CC9A0", notes: ["Falta fruta"] },
-  {
-    id: "colegio",
-    name: "Colegio",
-    owner: "Sin asignar",
-    weight: 6,
-    emoji: "🎒",
-    state: "Excursión 15 mayo",
-    line: "#7F77DD",
-    agent: "logistica",
-    notes: ["Firmar autorización"],
-  },
-  {
-    id: "tiempo-libre",
-    name: "Tiempo Libre",
-    owner: "Sin asignar",
-    weight: 7,
-    emoji: "🌿",
-    state: "Cada uno tiene su espacio",
-    line: "#4CC9A0",
-    agent: "armonia",
-    notes: [],
-  },
-];
+const DOMAINS: DomainCard[] = BASE_DOMAINS.map((domain) => ({
+  id: domain.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-"),
+  name: domain.name,
+  owner: "Sin asignar",
+  weight: domain.weight,
+  emoji: domain.emoji,
+  state: "Sin actividad",
+  line: domain.line,
+  agent: domain.agent,
+  notes: [],
+}));
 
 const CORCHO_MESSAGES: CorchoMessage[] = [];
 
