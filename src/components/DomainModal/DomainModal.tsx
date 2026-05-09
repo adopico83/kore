@@ -9,6 +9,7 @@ import {
   completeShoppingItem,
   deleteShoppingItem,
   getShoppingItems,
+  reactivateShoppingItem,
 } from "@/lib/actions/shopping";
 import {
   type ShoppingItemRow,
@@ -186,6 +187,16 @@ export function DomainModal({
     }
   };
 
+  const handleReactivateShopping = async (id: string) => {
+    try {
+      await reactivateShoppingItem(id);
+      emitKoreUpdate(["shopping_items"]);
+      await loadShoppingItems();
+    } catch {
+      /* ignore */
+    }
+  };
+
   const notesToSave = isCompras ? (domain.notes ?? []) : notes;
   const safeMembers = members ?? [];
   const ownerOptions = useMemo(() => [...safeMembers, "Sin asignar"], [safeMembers]);
@@ -284,7 +295,7 @@ export function DomainModal({
 
         {isCompras ? (
           <section style={cardStyle}>
-            <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Lista de la compra</p>
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Pendientes</p>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <input
                 value={newShoppingName}
@@ -464,37 +475,105 @@ export function DomainModal({
         )}
 
         <section style={cardStyle}>
-          <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Historial</p>
           {isCompras ? (
             completedShopping.length === 0 ? (
-              <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Sin items completados aún</p>
+              <>
+                <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Frecuentes</p>
+                <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Sin frecuentes todavía.</p>
+              </>
             ) : (
-              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-                {completedShopping.map((item) => {
-                  const d = new Date(item.created_at);
-                  const fecha = Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("es-ES");
-                  const hora = Number.isNaN(d.getTime())
-                    ? ""
-                    : d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false });
-                  const text = `${item.name}${item.quantity ? ` (${item.quantity})` : ""}`;
-                  return (
-                    <li
-                      key={item.id}
-                      style={{
-                        borderRadius: 8,
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        background: "rgba(255,255,255,0.04)",
-                        padding: "8px 9px",
-                      }}
-                    >
-                      <p style={{ margin: 0, fontSize: 11, color: "rgba(228,230,237,0.55)" }}>
-                        {fecha} {hora}
-                      </p>
-                      <p style={{ margin: "4px 0 0", fontSize: 13, color: "#e4e6ed", whiteSpace: "pre-wrap" }}>{text}</p>
-                    </li>
-                  );
-                })}
-              </ul>
+              <>
+                <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Frecuentes</p>
+                <ul
+                  style={{
+                    margin: 0,
+                    padding: 0,
+                    listStyle: "none",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                  }}
+                >
+                  {completedShopping.map((item) => {
+                    const text = `${item.name}${item.quantity ? ` (${item.quantity})` : ""}`;
+                    return (
+                      <li
+                        key={item.id}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          borderRadius: 999,
+                          border: "1px solid rgba(255,255,255,0.14)",
+                          background: "rgba(255,255,255,0.08)",
+                          color: "rgba(228,230,237,0.92)",
+                          padding: "4px 6px 4px 10px",
+                          maxWidth: "100%",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            lineHeight: 1.2,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {text}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleReactivateShopping(item.id)}
+                          aria-label={`Reactivar ${item.name}`}
+                          title="Reactivar"
+                          style={{
+                            border: "none",
+                            borderRadius: 999,
+                            width: 22,
+                            height: 22,
+                            background: "rgba(76,201,160,0.2)",
+                            color: "#4CC9A0",
+                            cursor: "pointer",
+                            fontSize: 14,
+                            fontWeight: 700,
+                            lineHeight: 1,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteShopping(item.id)}
+                          aria-label={`Eliminar ${item.name}`}
+                          title="Eliminar definitivamente"
+                          style={{
+                            border: "none",
+                            borderRadius: 999,
+                            width: 22,
+                            height: 22,
+                            background: "rgba(224,85,85,0.16)",
+                            color: "#E05555",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            lineHeight: 1,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          🗑
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )
           ) : history.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Sin registros aún</p>

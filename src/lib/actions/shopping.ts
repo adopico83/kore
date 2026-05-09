@@ -7,6 +7,7 @@ import {
   completeShoppingItem as dbCompleteShoppingItem,
   deleteShoppingItem as dbDeleteShoppingItem,
   getShoppingItems as dbGetShoppingItems,
+  reactivateShoppingItem as dbReactivateShoppingItem,
 } from "@/lib/kore-db";
 
 async function requireFamilyId(): Promise<string> {
@@ -34,6 +35,11 @@ export async function addShoppingItem(data: {
 export async function completeShoppingItem(id: string) {
   const familyId = await requireFamilyId();
   return dbCompleteShoppingItem(familyId, id);
+}
+
+export async function reactivateShoppingItem(id: string) {
+  const familyId = await requireFamilyId();
+  return dbReactivateShoppingItem(familyId, id);
 }
 
 export async function deleteShoppingItem(id: string) {

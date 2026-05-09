@@ -530,6 +530,11 @@ export async function completeShoppingItem(familyId: string, id: string): Promis
   throwDb("completeShoppingItem", error);
 }
 
+export async function reactivateShoppingItem(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("shopping_items").update({ completed: false }).eq("family_id", familyId).eq("id", id);
+  throwDb("reactivateShoppingItem", error);
+}
+
 export async function deleteShoppingItem(familyId: string, id: string): Promise<void> {
   const { error } = await db().from("shopping_items").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteShoppingItem", error);
