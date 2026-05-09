@@ -119,7 +119,7 @@ interface ChatMessage {
   content: string;
   imagenPreviews?: string[];
   at: string;
-  /** Acciones de tools aplicadas en la respuesta del ORC (servidor). */
+  /** Acciones de tools aplicadas en la respuesta de Kore (servidor). */
   toolsExecuted?: ToolExecuted[];
 }
 
@@ -316,7 +316,7 @@ function TypingIndicator() {
         }}
         role="status"
       >
-        <span style={srOnly}>El ORC está escribiendo</span>
+        <span style={srOnly}>Kore está escribiendo</span>
         <div style={{ display: "flex", height: 16, alignItems: "center", gap: 6 }}>
           {[0, 1, 2].map((i) => (
             <span
@@ -695,7 +695,7 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
         error?: string;
       };
       if (!res.ok) {
-        setError(data.error ?? "Error al llamar al ORC");
+        setError(data.error ?? "Error al llamar a Kore");
         return;
       }
       const respuestaTexto =
@@ -1001,7 +1001,7 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="ORC — Orquestador Kore"
+      aria-label="Kore"
     >
       <input
         ref={fileInputRef}
@@ -1035,7 +1035,7 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
               whiteSpace: "nowrap",
             }}
           >
-            ORC — Orquestador Kore
+            Kore
           </span>
           <button type="button" onClick={nuevaConversacion} {...touchEnd(nuevaConversacion)} style={btnGhost}>
             Nuevo
@@ -1140,7 +1140,7 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
               color: "rgba(255,255,255,0.7)",
             }}
           >
-            Escribe un mensaje al ORC para coordinar agenda, gastos, salud y dominios del hogar.
+            Escribe un mensaje a Kore para coordinar agenda, gastos, salud y dominios del hogar.
           </div>
         ) : (
           <>

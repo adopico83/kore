@@ -155,7 +155,7 @@ export default function OnboardingPage() {
         body: JSON.stringify({ mensaje: orcInstruction, historial: [] }),
       });
       const data = (await res.json().catch(() => ({}))) as { reply?: string; respuesta?: string; error?: string };
-      if (!res.ok) throw new Error(data.error || "No se pudo contactar con ORC.");
+      if (!res.ok) throw new Error(data.error || "No se pudo contactar con Kore.");
 
       const selectedDomainIds = await resolveDomainIdsByNames(familyId, NEWBORN_CRITICAL_DOMAIN_OPTIONS);
       const { partnerName, childrenNames } = await parseFamilyPeople(text);

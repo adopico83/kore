@@ -42,7 +42,15 @@ import {
 import { getHealthRecords } from "@/lib/actions/health";
 import { getExpenses } from "@/lib/actions/expenses";
 import { getKoreNotes } from "@/lib/actions/corcho";
-import { getDomains, updateDomain, addDomainHistory, getDomainHistory } from "@/lib/actions/domains";
+import {
+  activateDomain,
+  addDomainHistory,
+  createCustomDomain,
+  deactivateDomain,
+  getDomainHistory,
+  getDomains,
+  updateDomain,
+} from "@/lib/actions/domains";
 import { getShoppingItems } from "@/lib/actions/shopping";
 import { getPendingCleaningTasks } from "@/lib/actions/cleaning";
 import { getWeeklyMenu } from "@/lib/actions/menu";
@@ -180,6 +188,12 @@ type DomainCard = {
   line: string;
   agent?: string;
   notes?: string[];
+};
+
+type InactiveDomainOption = {
+  id: string;
+  name: string;
+  emoji: string;
 };
 
 const DOMAINS: DomainCard[] = BASE_DOMAINS.map((domain) => ({
@@ -421,6 +435,12 @@ export function HomeClient({
   const [showPerfil, setShowPerfil] = useState(false);
   const [usuarioPerfil, setUsuarioPerfil] = useState<Profile | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showAddCornerModal, setShowAddCornerModal] = useState(false);
+  const [inactiveDomainOptions, setInactiveDomainOptions] = useState<InactiveDomainOption[]>([]);
+  const [addCornerLoading, setAddCornerLoading] = useState(false);
+  const [addCornerError, setAddCornerError] = useState("");
+  const [customCornerName, setCustomCornerName] = useState("");
+  const [customCornerEmoji, setCustomCornerEmoji] = useState("");
   const [calendarInitialDate, setCalendarInitialDate] = useState<Date | null>(null);
   const [agendaEvents, setAgendaEvents] = useState<KoreAgendaEvent[]>(
     (initialCalendarEvents ?? [])
@@ -516,6 +536,92 @@ export function HomeClient({
       setDomains(DOMAINS);
     }
   }, []);
+
+  const loadInactiveDomainOptions = useCallback(async () => {
+    setAddCornerLoading(true);
+    setAddCornerError("");
+    try {
+      const rows = await getDomains();
+      const byName = new Map(rows.map((row) => [row.name, row]));
+      const options = BASE_DOMAINS
+        .map((base) => ({ base, row: byName.get(base.name) }))
+        .filter((entry) => entry.row && entry.row.is_active !== true)
+        .map((entry) => ({
+          id: entry.row!.id,
+          name: entry.base.name,
+          emoji: entry.base.emoji,
+        }));
+      setInactiveDomainOptions(options);
+    } catch {
+      setInactiveDomainOptions([]);
+      setAddCornerError("No se pudieron cargar los rincones disponibles.");
+    } finally {
+      setAddCornerLoading(false);
+    }
+  }, []);
+
+  const openAddCornerModal = useCallback(() => {
+    setShowAddCornerModal(true);
+    setCustomCornerName("");
+    setCustomCornerEmoji("");
+    void loadInactiveDomainOptions();
+  }, [loadInactiveDomainOptions]);
+
+  const handleActivateCorner = useCallback(async (domainId: string) => {
+    setAddCornerError("");
+    setAddCornerLoading(true);
+    try {
+      await activateDomain(domainId);
+      emitKoreUpdate(["domains"]);
+      await loadDomains();
+      setShowAddCornerModal(false);
+      setInactiveDomainOptions([]);
+    } catch {
+      setAddCornerError("No se pudo activar el rincón.");
+    } finally {
+      setAddCornerLoading(false);
+    }
+  }, [loadDomains]);
+
+  const handleCreateCustomCorner = useCallback(async () => {
+    const name = customCornerName.trim();
+    const emoji = customCornerEmoji.trim();
+    if (!name) {
+      setAddCornerError("Escribe un nombre para el rincón.");
+      return;
+    }
+    if (!emoji) {
+      setAddCornerError("Añade un emoji para el rincón.");
+      return;
+    }
+    setAddCornerError("");
+    setAddCornerLoading(true);
+    try {
+      await createCustomDomain(name, emoji);
+      emitKoreUpdate(["domains"]);
+      setCustomCornerName("");
+      setCustomCornerEmoji("");
+      await loadDomains();
+      setShowAddCornerModal(false);
+      setInactiveDomainOptions([]);
+    } catch {
+      setAddCornerError("No se pudo crear el rincón personalizado.");
+    } finally {
+      setAddCornerLoading(false);
+    }
+  }, [customCornerEmoji, customCornerName, loadDomains]);
+
+  const handleDeactivateCorner = useCallback(async (domainId: string) => {
+    const confirmed = window.confirm("¿Desactivar este rincón? Volverá al catálogo de +");
+    if (!confirmed) return;
+    try {
+      await deactivateDomain(domainId);
+      emitKoreUpdate(["domains"]);
+      await loadDomains();
+    } catch {
+      /* ignore */
+    }
+  }, [loadDomains]);
 
   const loadAgenda = useCallback(async () => {
     try {
@@ -1188,290 +1294,216 @@ export function HomeClient({
                   gap: 8,
                 }}
               >
-                {domains.slice(0, 4).map((d) => {
+                {domains.map((d) => {
                   const domHover = domainCardHover[d.name] ?? false;
                   return (
-                  <button
+                  <div
                     key={d.id || d.name}
-                    type="button"
-                    onClick={() => setActiveDomainName(d.name)}
-                    onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
-                    onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
-                    onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
-                    onTouchEnd={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                     style={{
                       position: "relative",
-                      overflow: "hidden",
-                      background: "#161a22",
-                      borderRadius: 14,
-                      padding: 12,
-                      border: domHover
-                        ? "0.5px solid rgba(255, 255, 255, 0.2)"
-                        : "0.5px solid rgba(255, 255, 255, 0.07)",
-                      boxSizing: "border-box",
-                      textAlign: "left",
-                      color: C.text,
-                      cursor: "pointer",
-                      font: "inherit",
-                      transform: domHover ? "scale(1.03) translateY(-3px)" : "scale(1) translateY(0)",
-                      transition: "all 0.2s ease",
                     }}
                   >
-                    <div
+                    <button
+                      type="button"
+                      onClick={() => setActiveDomainName(d.name)}
+                      onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
+                      onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
+                      onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
+                      onTouchEnd={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
                       style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: 2,
-                        backgroundColor: d.line,
+                        position: "relative",
+                        overflow: "hidden",
+                        background: "#161a22",
+                        borderRadius: 14,
+                        padding: 12,
+                        border: domHover
+                          ? "0.5px solid rgba(255, 255, 255, 0.2)"
+                          : "0.5px solid rgba(255, 255, 255, 0.07)",
+                        boxSizing: "border-box",
+                        textAlign: "left",
+                        color: C.text,
+                        cursor: "pointer",
+                        font: "inherit",
+                        transform: domHover ? "scale(1.03) translateY(-3px)" : "scale(1) translateY(0)",
+                        transition: "all 0.2s ease",
+                        width: "100%",
                       }}
-                    />
-                    <div style={{ paddingTop: 6 }}>
+                    >
                       <div
                         style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "space-between",
-                          gap: 4,
-                          marginBottom: 8,
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: 2,
+                          backgroundColor: d.line,
                         }}
-                      >
-                        {booting ? (
-                          <span style={{ display: "inline-block", width: 18, height: 18, borderRadius: "50%", background: SKEL.bg }} />
-                        ) : (
-                          <span style={{ fontSize: 18, lineHeight: 1 }}>{d.emoji}</span>
-                        )}
-                        <span
+                      />
+                      <div style={{ paddingTop: 6 }}>
+                        <div
                           style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: 4,
+                            marginBottom: 8,
+                          }}
+                        >
+                          {booting ? (
+                            <span style={{ display: "inline-block", width: 18, height: 18, borderRadius: "50%", background: SKEL.bg }} />
+                          ) : (
+                            <span style={{ fontSize: 18, lineHeight: 1 }}>{d.emoji}</span>
+                          )}
+                          <span
+                            style={{
+                              borderRadius: 999,
+                              border: "0.5px solid rgba(255,255,255,0.1)",
+                              background: "rgba(255,255,255,0.04)",
+                              padding: "2px 8px",
+                              fontSize: 10,
+                              color: C.muted,
+                            }}
+                          >
+                            {booting ? (
+                              <span style={{ display: "inline-block", width: 46, height: 8, borderRadius: 999, background: SKEL.bg }} />
+                            ) : (
+                              d.owner
+                            )}
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: C.text }}>
+                          {booting ? <span style={{ display: "inline-block", width: "70%", height: 12, borderRadius: 999, background: SKEL.bg }} /> : d.name}
+                        </p>
+                        <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
+                          {booting ? <span style={{ display: "inline-block", width: "55%", height: 10, borderRadius: 999, background: SKEL.bg }} /> : d.state}
+                        </p>
+                        {d.notes && d.notes.length > 0 ? (
+                          <p
+                            style={{
+                              margin: "4px 0 0",
+                              fontSize: 11,
+                              color: C.muted,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {d.notes[d.notes.length - 1]}
+                          </p>
+                        ) : null}
+                        {d.agent ? (
+                          <p
+                            style={{
+                              margin: "4px 0 0",
+                              fontSize: 9,
+                              fontFamily: "ui-monospace, monospace",
+                              color: "rgba(228,230,237,0.35)",
+                              letterSpacing: "0.04em",
+                            }}
+                          >
+                            Agent: {d.agent}
+                          </p>
+                        ) : null}
+                        <div
+                          style={{
+                            marginTop: 12,
+                            height: 6,
+                            overflow: "hidden",
                             borderRadius: 999,
-                            border: "0.5px solid rgba(255,255,255,0.1)",
-                            background: "rgba(255,255,255,0.04)",
-                            padding: "2px 8px",
+                            background: "rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: "100%",
+                              borderRadius: 999,
+                              background: d.line,
+                              width: `${(d.weight / 15) * 100}%`,
+                            }}
+                          />
+                        </div>
+                        <p
+                          style={{
+                            margin: "6px 0 0",
+                            textAlign: "right",
+                            fontFamily: "ui-monospace, monospace",
                             fontSize: 10,
                             color: C.muted,
                           }}
                         >
-                          {booting ? (
-                            <span style={{ display: "inline-block", width: 46, height: 8, borderRadius: 999, background: SKEL.bg }} />
-                          ) : (
-                            d.owner
-                          )}
-                        </span>
-                      </div>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: C.text }}>
-                        {booting ? <span style={{ display: "inline-block", width: "70%", height: 12, borderRadius: 999, background: SKEL.bg }} /> : d.name}
-                      </p>
-                      <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
-                        {booting ? <span style={{ display: "inline-block", width: "55%", height: 10, borderRadius: 999, background: SKEL.bg }} /> : d.state}
-                      </p>
-                      {d.notes && d.notes.length > 0 ? (
-                        <p
-                          style={{
-                            margin: "4px 0 0",
-                            fontSize: 11,
-                            color: C.muted,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {d.notes[d.notes.length - 1]}
+                          {booting ? <span style={{ display: "inline-block", width: 38, height: 10, borderRadius: 999, background: SKEL.bg }} /> : `${d.weight}/15`}
                         </p>
-                      ) : null}
-                      {d.agent ? (
-                        <p
-                          style={{
-                            margin: "4px 0 0",
-                            fontSize: 9,
-                            fontFamily: "ui-monospace, monospace",
-                            color: "rgba(228,230,237,0.35)",
-                            letterSpacing: "0.04em",
-                          }}
-                        >
-                          Agent: {d.agent}
-                        </p>
-                      ) : null}
-                      <div
-                        style={{
-                          marginTop: 12,
-                          height: 6,
-                          overflow: "hidden",
-                          borderRadius: 999,
-                          background: "rgba(255,255,255,0.08)",
-                        }}
-                      >
-                        <div
-                          style={{
-                            height: "100%",
-                            borderRadius: 999,
-                            background: d.line,
-                            width: `${(d.weight / 15) * 100}%`,
-                          }}
-                        />
                       </div>
-                      <p
-                        style={{
-                          margin: "6px 0 0",
-                          textAlign: "right",
-                          fontFamily: "ui-monospace, monospace",
-                          fontSize: 10,
-                          color: C.muted,
-                        }}
-                      >
-                        {booting ? <span style={{ display: "inline-block", width: 38, height: 10, borderRadius: 999, background: SKEL.bg }} /> : `${d.weight}/15`}
-                      </p>
-                    </div>
-                  </button>
-                  );
-                })}
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                  marginTop: 8,
-                }}
-              >
-                {domains.slice(4).map((d) => {
-                  const domHover = domainCardHover[d.name] ?? false;
-                  return (
-                  <button
-                    key={d.id || d.name}
-                    type="button"
-                    onClick={() => setActiveDomainName(d.name)}
-                    onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
-                    onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
-                    onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
-                    onTouchEnd={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
-                    style={{
-                      position: "relative",
-                      overflow: "hidden",
-                      background: "#161a22",
-                      borderRadius: 14,
-                      padding: 12,
-                      border: domHover
-                        ? "0.5px solid rgba(255, 255, 255, 0.2)"
-                        : "0.5px solid rgba(255, 255, 255, 0.07)",
-                      boxSizing: "border-box",
-                      width: "100%",
-                      textAlign: "left",
-                      color: C.text,
-                      cursor: "pointer",
-                      font: "inherit",
-                      transform: domHover ? "scale(1.03) translateY(-3px)" : "scale(1) translateY(0)",
-                      transition: "all 0.2s ease",
-                    }}
-                  >
-                    <div
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeactivateCorner(d.id)}
+                      aria-label={`Desactivar ${d.name}`}
+                      title="Desactivar rincón"
                       style={{
                         position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: 2,
-                        backgroundColor: d.line,
+                        top: 8,
+                        right: 8,
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        border: "1px solid rgba(255,255,255,0.14)",
+                        background: "rgba(9,11,16,0.65)",
+                        color: "rgba(228,230,237,0.75)",
+                        fontSize: 12,
+                        lineHeight: 1,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        zIndex: 2,
                       }}
-                    />
-                    <div style={{ paddingTop: 6 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "space-between",
-                          gap: 4,
-                          marginBottom: 8,
-                        }}
-                      >
-                        {booting ? (
-                          <span style={{ display: "inline-block", width: 18, height: 18, borderRadius: "50%", background: SKEL.bg }} />
-                        ) : (
-                          <span style={{ fontSize: 18, lineHeight: 1 }}>{d.emoji}</span>
-                        )}
-                        <span
-                          style={{
-                            borderRadius: 999,
-                            border: "0.5px solid rgba(255,255,255,0.1)",
-                            background: "rgba(255,255,255,0.04)",
-                            padding: "2px 8px",
-                            fontSize: 10,
-                            color: C.muted,
-                          }}
-                        >
-                          {booting ? (
-                            <span style={{ display: "inline-block", width: 46, height: 8, borderRadius: 999, background: SKEL.bg }} />
-                          ) : (
-                            d.owner
-                          )}
-                        </span>
-                      </div>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: C.text }}>
-                        {booting ? <span style={{ display: "inline-block", width: "70%", height: 12, borderRadius: 999, background: SKEL.bg }} /> : d.name}
-                      </p>
-                      <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
-                        {booting ? <span style={{ display: "inline-block", width: "55%", height: 10, borderRadius: 999, background: SKEL.bg }} /> : d.state}
-                      </p>
-                      {d.notes && d.notes.length > 0 ? (
-                        <p
-                          style={{
-                            margin: "4px 0 0",
-                            fontSize: 11,
-                            color: C.muted,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {d.notes[d.notes.length - 1]}
-                        </p>
-                      ) : null}
-                      {d.agent ? (
-                        <p
-                          style={{
-                            margin: "4px 0 0",
-                            fontSize: 9,
-                            fontFamily: "ui-monospace, monospace",
-                            color: "rgba(228,230,237,0.35)",
-                            letterSpacing: "0.04em",
-                          }}
-                        >
-                          Agent: {d.agent}
-                        </p>
-                      ) : null}
-                      <div
-                        style={{
-                          marginTop: 12,
-                          height: 6,
-                          overflow: "hidden",
-                          borderRadius: 999,
-                          background: "rgba(255,255,255,0.08)",
-                        }}
-                      >
-                        <div
-                          style={{
-                            height: "100%",
-                            borderRadius: 999,
-                            background: d.line,
-                            width: `${(d.weight / 15) * 100}%`,
-                          }}
-                        />
-                      </div>
-                      <p
-                        style={{
-                          margin: "6px 0 0",
-                          textAlign: "right",
-                          fontFamily: "ui-monospace, monospace",
-                          fontSize: 10,
-                          color: C.muted,
-                        }}
-                      >
-                        {booting ? <span style={{ display: "inline-block", width: 38, height: 10, borderRadius: 999, background: SKEL.bg }} /> : `${d.weight}/15`}
-                      </p>
-                    </div>
-                  </button>
+                    >
+                      ×
+                    </button>
+                  </div>
                   );
                 })}
+                <button
+                  type="button"
+                  onClick={openAddCornerModal}
+                  style={{
+                    borderRadius: 14,
+                    border: "1px dashed rgba(255, 255, 255, 0.22)",
+                    background: "rgba(255,255,255,0.02)",
+                    minHeight: 140,
+                    padding: 12,
+                    color: C.text,
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    font: "inherit",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "50%",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: "1px solid rgba(76, 201, 160, 0.5)",
+                      background: "rgba(76, 201, 160, 0.15)",
+                      color: C.green,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                    }}
+                    aria-hidden
+                  >
+                    +
+                  </span>
+                  <span style={{ fontSize: 13, color: C.muted, fontWeight: 600 }}>Más rincones</span>
+                </button>
               </div>
             </div>
           ) : null}
@@ -1918,7 +1950,7 @@ export function HomeClient({
             setShowCorchoHistorial(false);
             setShowAgent(true);
           }}
-          aria-label="ORC / Agente"
+          aria-label="Kore / Agente"
           style={{
             width: 66,
             height: 66,
@@ -2039,6 +2071,153 @@ export function HomeClient({
           onUpdateEvent={handleCalendarUpdateEvent}
           onDeleteEvent={handleCalendarDeleteEvent}
         />
+      ) : null}
+      {showAddCornerModal ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Añadir rincones"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 8600,
+            background: "rgba(9,11,16,0.86)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              maxHeight: "85vh",
+              overflowY: "auto",
+              borderRadius: 14,
+              border: "1px solid rgba(255,255,255,0.1)",
+              background: "#161a22",
+              color: C.text,
+              padding: 14,
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Más rincones</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCornerModal(false);
+                  setAddCornerError("");
+                }}
+                style={{
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  background: "transparent",
+                  color: C.text,
+                  width: 32,
+                  height: 32,
+                  cursor: "pointer",
+                }}
+                aria-label="Cerrar"
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: C.muted }}>Activa un rincón base</p>
+            {addCornerLoading ? (
+              <p style={{ margin: "0 0 10px", fontSize: 12, color: C.muted }}>Cargando rincones…</p>
+            ) : inactiveDomainOptions.length === 0 ? (
+              <p style={{ margin: "0 0 10px", fontSize: 12, color: C.muted }}>No hay rincones base pendientes por activar.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                {inactiveDomainOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => void handleActivateCorner(option.id)}
+                    disabled={addCornerLoading}
+                    style={{
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.04)",
+                      color: C.text,
+                      padding: "8px 10px",
+                      textAlign: "left",
+                      cursor: addCornerLoading ? "not-allowed" : "pointer",
+                      opacity: addCornerLoading ? 0.6 : 1,
+                    }}
+                  >
+                    <span style={{ marginRight: 6 }}>{option.emoji}</span>
+                    {option.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
+              <p style={{ margin: "0 0 8px", fontSize: 12, color: C.muted }}>Rincón personalizado</p>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <input
+                  value={customCornerEmoji}
+                  onChange={(e) => setCustomCornerEmoji(e.target.value)}
+                  placeholder="🙂"
+                  maxLength={3}
+                  style={{
+                    width: 58,
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: C.text,
+                    padding: "8px",
+                    textAlign: "center",
+                    fontSize: 18,
+                    boxSizing: "border-box",
+                  }}
+                />
+                <input
+                  value={customCornerName}
+                  onChange={(e) => setCustomCornerName(e.target.value)}
+                  placeholder="Nombre del rincón"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: C.text,
+                    padding: "8px 10px",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCreateCustomCorner()}
+                disabled={addCornerLoading}
+                style={{
+                  width: "100%",
+                  borderRadius: 8,
+                  border: "none",
+                  background: C.green,
+                  color: "#0a1a14",
+                  padding: "9px 10px",
+                  fontWeight: 700,
+                  cursor: addCornerLoading ? "not-allowed" : "pointer",
+                  opacity: addCornerLoading ? 0.7 : 1,
+                }}
+              >
+                Crear rincón
+              </button>
+            </div>
+
+            {addCornerError ? (
+              <p style={{ margin: "10px 0 0", fontSize: 12, color: C.red }}>{addCornerError}</p>
+            ) : null}
+          </div>
+        </div>
       ) : null}
       </div>
     </div>

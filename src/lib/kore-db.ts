@@ -376,6 +376,38 @@ export async function updateDomain(familyId: string, id: string, data: Partial<D
   throwDb("updateDomain", error);
 }
 
+export async function activateDomain(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("domains").update({ is_active: true }).eq("family_id", familyId).eq("id", id);
+  throwDb("activateDomain", error);
+}
+
+export async function deactivateDomain(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("domains").update({ is_active: false }).eq("family_id", familyId).eq("id", id);
+  throwDb("deactivateDomain", error);
+}
+
+export async function createCustomDomain(
+  familyId: string,
+  data: { name: string; emoji: string; owner_id?: string | null; weight?: number; priority_level?: number | null },
+): Promise<Domain> {
+  const cleanName = data.name.trim();
+  const cleanEmoji = data.emoji.trim();
+  if (!cleanName) throw new Error("createCustomDomain: name required");
+  const displayName = cleanEmoji ? `${cleanEmoji} ${cleanName}` : cleanName;
+  const payload = {
+    family_id: familyId,
+    name: displayName,
+    weight: data.weight ?? 5,
+    is_active: true,
+    owner_id: data.owner_id ?? null,
+    priority_level: data.priority_level ?? null,
+    agent: null,
+  };
+  const { data: created, error } = await db().from("domains").insert(payload).select("*").single();
+  throwDb("createCustomDomain", error);
+  return created as Domain;
+}
+
 export async function addDomainHistory(
   familyId: string,
   domainId: string,
