@@ -9,6 +9,7 @@ import {
   getPendingCleaningTasks,
   getProfiles,
   getShoppingItems,
+  type Profile,
 } from "@/lib/kore-db";
 
 const openai = new OpenAI({
@@ -16,6 +17,76 @@ const openai = new OpenAI({
 });
 
 type Hist = { role: string; content: string };
+
+function familyDisplayNameFromProfiles(profiles: Profile[]): string {
+  const adults = profiles.filter((p) => p.role !== "child");
+  const surnames = adults
+    .map((p) => {
+      const parts = p.name.trim().split(/\s+/).filter(Boolean);
+      return parts.length > 0 ? parts[parts.length - 1]! : "";
+    })
+    .filter(Boolean);
+  const unique = [...new Set(surnames)];
+  if (unique.length === 0) return "tu hogar";
+  return unique.join("-");
+}
+
+function sortProfilesForSnapshot(a: Profile, b: Profile): number {
+  const rank = (r: string | null) => {
+    if (r === "owner") return 0;
+    if (r === "member") return 1;
+    if (r === "child") return 3;
+    return 2;
+  };
+  const d = rank(a.role) - rank(b.role);
+  if (d !== 0) return d;
+  return a.name.localeCompare(b.name, "es");
+}
+
+function formatProfileSnapshotLabel(p: Profile): string {
+  const n = p.name.trim();
+  if (p.role === "owner") return `${n} (Admin)`;
+  if (p.role === "child") return `${n} (Hijo/a)`;
+  return `${n} (Pareja)`;
+}
+
+function buildNaturalLanguageRefLines(profiles: Profile[]): string[] {
+  const lines: string[] = [];
+  const children = profiles.filter((p) => p.role === "child");
+  const partners = profiles.filter((p) => p.role !== "owner" && p.role !== "child");
+
+  if (children.length === 1) {
+    const n = children[0]!.name.trim();
+    lines.push(`- "la peque", "el peque" → ${n}`);
+    lines.push(`- "los niños", "los hijos" → ${n}`);
+  } else if (children.length > 1) {
+    const all = children.map((c) => c.name.trim()).join(", ");
+    lines.push(`- "los niños", "los hijos" → ${all}`);
+    lines.push(`- "la peque", "el peque" → ambiguos con varios hijos; usar nombres: ${all}`);
+  }
+
+  if (partners.length > 0) {
+    const names = partners.map((p) => p.name.trim()).join(", ");
+    lines.push(`- "mi pareja", "mi mujer", "mi marido" → ${names}`);
+  }
+
+  return lines;
+}
+
+/** Snapshot de estructura familiar + referencias coloquiales; solo datos de getProfiles. */
+function buildFamilySnapshotText(profiles: Profile[]): string {
+  if (profiles.length === 0) {
+    return ["FAMILIA (snapshot):", "Sin perfiles en esta familia."].join("\n");
+  }
+  const label = familyDisplayNameFromProfiles(profiles);
+  const miembros = [...profiles].sort(sortProfilesForSnapshot).map(formatProfileSnapshotLabel).join(", ");
+  const refLines = buildNaturalLanguageRefLines(profiles);
+  return [
+    "FAMILIA (snapshot):",
+    `Familia: ${label}. Miembros: ${miembros}.`,
+    ...(refLines.length > 0 ? ["Referencias en lenguaje coloquial:", ...refLines] : []),
+  ].join("\n");
+}
 
 function hhmmNowServer(): string {
   return new Date().toTimeString().slice(0, 5);
@@ -237,6 +308,8 @@ export async function POST(request: NextRequest) {
       getPendingCleaningTasks(familyId),
     ]);
     const systemPrompt = buildSystemPrompt(memories);
+    const familySnapshotText = buildFamilySnapshotText(profiles);
+    const systemPromptWithFamily = `${systemPrompt}\n\n${familySnapshotText}`;
     const adults = profiles.filter((p) => p.role !== "child");
     const avgStress =
       adults.length > 0
@@ -275,7 +348,7 @@ export async function POST(request: NextRequest) {
     }
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPromptWithFamily },
       { role: "system", content: snapshotText },
       ...historialLimpio,
       { role: "user", content: userParts },
@@ -362,7 +435,7 @@ export async function POST(request: NextRequest) {
     } else {
       // FASE 1 — Planning
       let planning = await planToolsFromModel({
-        systemPrompt,
+        systemPrompt: systemPromptWithFamily,
         historialLimpio,
         userParts,
         toolChoice,
@@ -375,7 +448,7 @@ export async function POST(request: NextRequest) {
 
       if (planning.plan.length === 0) {
         planning = await planToolsFromModel({
-          systemPrompt,
+          systemPrompt: systemPromptWithFamily,
           historialLimpio,
           userParts,
           toolChoice: "required",
