@@ -3,7 +3,6 @@
 import { History, Loader2, Paperclip, Trash2, X } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import {
-  useCallback,
   useEffect,
   useRef,
   useState,
@@ -15,19 +14,13 @@ import {
 import ReactMarkdown from "react-markdown";
 import { emitKoreUpdate, type KoreTable } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
-
-const lsIndexKey = (uid: string) => {
-  if (!uid) throw new Error("ID de usuario requerido para el chat");
-  return `kore_orc_conv_index_${uid}`;
-};
-const lsMsgsKey = (uid: string, cid: string) => {
-  if (!uid) throw new Error("ID de usuario requerido para el chat");
-  return `kore_orc_msgs_${uid}_${cid}`;
-};
-const lsActiveKey = (uid: string) => {
-  if (!uid) throw new Error("ID de usuario requerido para el chat");
-  return `kore_orc_active_conv_${uid}`;
-};
+import {
+  deleteAgentConversation,
+  getAgentConversations as fetchAgentConversations,
+  getAgentMessages as fetchAgentMessages,
+  importLegacyAgentMessages,
+  saveAgentMessage as persistAgentMessage,
+} from "@/lib/actions/agent-chat";
 
 const toolToTable: Record<string, KoreTable[]> = {
   // Agenda
@@ -152,44 +145,125 @@ function generateConversationId() {
   return `conv_${Date.now()}`;
 }
 
-function readConvIndex(currentUserId: string): ConvMeta[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(lsIndexKey(currentUserId));
-    if (!raw) return [];
-    const p = JSON.parse(raw) as ConvMeta[];
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
+const AGENT_MSG_V = 1 as const;
+
+type StoredAgentPayload = {
+  v: typeof AGENT_MSG_V;
+  t: string;
+  i?: string[];
+  tools?: ToolExecuted[];
+};
+
+function serializeMessageForStorage(m: ChatMessage): string {
+  const hasExtras =
+    (m.imagenPreviews?.length ?? 0) > 0 || (m.toolsExecuted?.length ?? 0) > 0;
+  if (!hasExtras) {
+    return JSON.stringify({ v: AGENT_MSG_V, t: m.content } satisfies StoredAgentPayload);
   }
+  return JSON.stringify({
+    v: AGENT_MSG_V,
+    t: m.content,
+    ...(m.imagenPreviews?.length ? { i: m.imagenPreviews } : {}),
+    ...(m.toolsExecuted?.length ? { tools: m.toolsExecuted } : {}),
+  } satisfies StoredAgentPayload);
 }
 
-function writeConvIndex(currentUserId: string, list: ConvMeta[]) {
+function parseMessageFromStorage(
+  content: string,
+  role: MessageRole,
+): Pick<ChatMessage, "content" | "imagenPreviews" | "toolsExecuted"> {
   try {
-    localStorage.setItem(lsIndexKey(currentUserId), JSON.stringify(list.slice(0, 20)));
+    const p = JSON.parse(content) as Partial<StoredAgentPayload>;
+    if (p && p.v === AGENT_MSG_V && typeof p.t === "string") {
+      return {
+        content: p.t,
+        imagenPreviews: p.i,
+        toolsExecuted: p.tools,
+      };
+    }
   } catch {
-    /* ignore */
+    /* texto plano */
   }
+  return { content };
 }
 
-function readMsgs(currentUserId: string, cid: string): ChatMessage[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(lsMsgsKey(currentUserId, cid));
-    if (!raw) return [];
-    const p = JSON.parse(raw) as ChatMessage[];
-    return Array.isArray(p) ? p : [];
-  } catch {
-    return [];
-  }
+function rowToChatMessage(row: {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string | null;
+}): ChatMessage {
+  const role: MessageRole = row.role === "assistant" ? "assistant" : "user";
+  const parsed = parseMessageFromStorage(row.content, role);
+  return {
+    id: row.id,
+    role,
+    ...parsed,
+    at: row.created_at ?? new Date().toISOString(),
+  };
 }
 
-function writeMsgs(currentUserId: string, cid: string, msgs: ChatMessage[]) {
-  try {
-    localStorage.setItem(lsMsgsKey(currentUserId, cid), JSON.stringify(msgs));
-  } catch {
-    /* ignore */
+function mergeEphemeralIntoConversaciones(
+  serverList: ConvMeta[],
+  activeCid: string,
+  historialLen: number,
+): ConvMeta[] {
+  if (historialLen > 0) return serverList;
+  if (serverList.some((c) => c.conversation_id === activeCid)) return serverList;
+  return [
+    {
+      conversation_id: activeCid,
+      titulo: "Nueva conversación",
+      created_at: new Date().toISOString(),
+      total_mensajes: 0,
+    },
+    ...serverList,
+  ].slice(0, 20);
+}
+
+async function migrateLegacyAgentChatFromLocalStorage(currentUserId: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  const marker = `kore_agent_chat_supabase_v1_${currentUserId}`;
+  if (localStorage.getItem(marker) === "1") return;
+
+  const rows: { conversation_id: string; role: string; content: string; created_at?: string }[] = [];
+  const indexKey = `kore_orc_conv_index_${currentUserId}`;
+  const rawIndex = localStorage.getItem(indexKey);
+
+  if (rawIndex) {
+    try {
+      const idx = JSON.parse(rawIndex) as ConvMeta[];
+      if (Array.isArray(idx)) {
+        for (const c of idx) {
+          const msgsRaw = localStorage.getItem(`kore_orc_msgs_${currentUserId}_${c.conversation_id}`);
+          if (!msgsRaw) continue;
+          const msgs = JSON.parse(msgsRaw) as ChatMessage[];
+          if (!Array.isArray(msgs)) continue;
+          for (const m of msgs) {
+            if (m.role !== "user" && m.role !== "assistant") continue;
+            rows.push({
+              conversation_id: c.conversation_id,
+              role: m.role,
+              content: serializeMessageForStorage(m),
+              created_at: m.at,
+            });
+          }
+        }
+      }
+    } catch {
+      /* índice corrupto */
+    }
   }
+
+  if (rows.length > 0) {
+    await importLegacyAgentMessages(currentUserId, rows);
+  }
+
+  for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+    const k = localStorage.key(i);
+    if (k?.startsWith("kore_orc_")) localStorage.removeItem(k);
+  }
+  localStorage.setItem(marker, "1");
 }
 
 async function comprimirImagenParaAgente(file: File): Promise<string> {
@@ -511,9 +585,10 @@ export type AgentChatProps = {
 };
 
 export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
-  if (!currentUserId || currentUserId === "") return null;
-
-  useEscapeKey(onClose);
+  const uid = currentUserId?.trim() ?? "";
+  useEscapeKey(() => {
+    if (uid) onClose();
+  });
   const [fechaRelativaAnchorMs, setFechaRelativaAnchorMs] = useState<number | null>(null);
   const [mensaje, setMensaje] = useState("");
   const [historial, setHistorial] = useState<ChatMessage[]>([]);
@@ -540,96 +615,49 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
     setFechaRelativaAnchorMs(Date.now());
   }, []);
 
-  const persistMessages = useCallback((cid: string, msgs: ChatMessage[]) => {
-    writeMsgs(currentUserId, cid, msgs);
-  }, [currentUserId]);
-
-  const persistIndex = useCallback((list: ConvMeta[]) => {
-    writeConvIndex(currentUserId, list);
-    setConversaciones(list);
-  }, [currentUserId]);
-
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i += 1) {
-        const key = localStorage.key(i);
-        if (!key) continue;
-        if (!key.startsWith("kore_orc_")) continue;
-        if (key.includes("__") || key.endsWith("_")) {
-          keysToRemove.push(key);
-        }
-      }
-      for (const key of keysToRemove) {
-        localStorage.removeItem(key);
-      }
-    } catch {
-      /* ignore */
-    }
-    const idx = readConvIndex(currentUserId);
-    setConversaciones(idx);
-    const savedActive = localStorage.getItem(lsActiveKey(currentUserId))?.trim();
-    const pick =
-      (savedActive && idx.some((c) => c.conversation_id === savedActive) ? savedActive : null) ??
-      idx[0]?.conversation_id ??
-      generateConversationId();
-    setConversationId(pick);
-    setHistorial(readMsgs(currentUserId, pick));
-    if (!idx.length) {
-      const first: ConvMeta = {
-        conversation_id: pick,
-        titulo: "Nueva conversación",
-        created_at: new Date().toISOString(),
-        total_mensajes: readMsgs(currentUserId, pick).length,
-      };
-      persistIndex([first]);
-    } else {
+    if (!uid) return;
+    let cancelled = false;
+    void (async () => {
       try {
-        localStorage.setItem(lsActiveKey(currentUserId), pick);
-      } catch {
-        /* ignore */
+        await migrateLegacyAgentChatFromLocalStorage(uid);
+      } catch (e) {
+        console.error("[AgentChat] migración desde localStorage", e);
       }
-    }
-    setHydrated(true);
-  }, [persistIndex, currentUserId]);
-
-  useEffect(() => {
-    if (!hydrated || !conversationId) return;
-    try {
-      localStorage.setItem(lsActiveKey(currentUserId), conversationId);
-    } catch {
-      /* ignore */
-    }
-    persistMessages(conversationId, historial);
-
-    const idx = readConvIndex(currentUserId);
-    const rawTitulo = historial.find((m) => m.role === "user")?.content.trim() ?? "";
-    const titulo =
-      rawTitulo.length > 60 ? `${rawTitulo.slice(0, 60)}…` : rawTitulo || "Nueva conversación";
-    const exists = idx.some((c) => c.conversation_id === conversationId);
-    const next: ConvMeta[] = exists
-      ? idx.map((c) =>
-          c.conversation_id === conversationId
-            ? {
-                ...c,
-                total_mensajes: historial.length,
-                titulo: historial.some((m) => m.role === "user") ? titulo : c.titulo,
-              }
-            : c,
-        )
-      : [
-          {
-            conversation_id: conversationId,
-            titulo,
-            created_at: new Date().toISOString(),
-            total_mensajes: historial.length,
-          },
-          ...idx,
-        ].slice(0, 20);
-    writeConvIndex(currentUserId, next);
-    setConversaciones(next);
-  }, [historial, conversationId, hydrated, persistMessages, currentUserId]);
+      if (cancelled) return;
+      try {
+        const list = await fetchAgentConversations();
+        if (cancelled) return;
+        if (list.length === 0) {
+          const pick = generateConversationId();
+          setConversationId(pick);
+          setHistorial([]);
+          setConversaciones([
+            {
+              conversation_id: pick,
+              titulo: "Nueva conversación",
+              created_at: new Date().toISOString(),
+              total_mensajes: 0,
+            },
+          ]);
+        } else {
+          const pick = list[0].conversation_id;
+          setConversationId(pick);
+          const rows = await fetchAgentMessages(pick);
+          if (cancelled) return;
+          setHistorial(rows.map(rowToChatMessage));
+          setConversaciones(mergeEphemeralIntoConversaciones(list, pick, rows.length));
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Error al cargar el historial");
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -661,23 +689,40 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
       (imagenesEnviar.length > 1
         ? `📎 ${imagenesEnviar.length} imágenes adjuntas`
         : "📎 Imagen adjunta");
+    const userTempId = crypto.randomUUID?.() ?? `u_${Date.now()}`;
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID?.() ?? `u_${Date.now()}`,
+      id: userTempId,
       role: "user",
       content: contenidoUsuario,
       imagenPreviews: imagenesEnviar.length ? imagenesEnviar.slice() : undefined,
       at: now,
     };
-    setHistorial((prev) => [...prev, userMsg]);
+    const prevHist = historial;
+    const mergedForSend = [...prevHist, userMsg];
+    setHistorial(mergedForSend);
     if (opts?.desdeTranscripcion) setTranscribiendoAudio(false);
 
-    const histParaApi = [...historial, userMsg].map((m) => ({
+    const histParaApi = mergedForSend.map((m) => ({
       role: m.role,
       content: m.content,
     }));
 
     setLoading(true);
     try {
+      let savedUser;
+      try {
+        savedUser = await persistAgentMessage(
+          conversationId,
+          "user",
+          serializeMessageForStorage(userMsg),
+        );
+      } catch (e) {
+        setHistorial((h) => h.filter((m) => m.id !== userTempId));
+        setError(e instanceof Error ? e.message : "No se pudo guardar el mensaje");
+        return;
+      }
+      setHistorial((h) => h.map((m) => (m.id === userTempId ? rowToChatMessage(savedUser) : m)));
+
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -713,17 +758,35 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
         }
         if (touched.size > 0) emitKoreUpdate(Array.from(touched));
       }
+      const asstTempId = crypto.randomUUID?.() ?? `a_${Date.now()}`;
       const asstAt = new Date().toISOString();
-      setHistorial((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID?.() ?? `a_${Date.now()}`,
-          role: "assistant",
-          content: respuestaTexto,
-          at: asstAt,
-          ...(toolsExecuted?.length ? { toolsExecuted } : {}),
-        },
-      ]);
+      const asstDraft: ChatMessage = {
+        id: asstTempId,
+        role: "assistant",
+        content: respuestaTexto,
+        at: asstAt,
+        ...(toolsExecuted?.length ? { toolsExecuted } : {}),
+      };
+      setHistorial((h) => [...h, asstDraft]);
+      try {
+        const savedAsst = await persistAgentMessage(
+          conversationId,
+          "assistant",
+          serializeMessageForStorage(asstDraft),
+        );
+        setHistorial((h) => h.map((m) => (m.id === asstTempId ? rowToChatMessage(savedAsst) : m)));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "No se pudo guardar la respuesta");
+      }
+
+      try {
+        const list = await fetchAgentConversations();
+        setConversaciones(
+          mergeEphemeralIntoConversaciones(list, conversationId, mergedForSend.length + 1),
+        );
+      } catch {
+        /* listado: fallo no bloquea el envío */
+      }
     } catch {
       setError("Error de conexión");
     } finally {
@@ -872,20 +935,9 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
     setTranscribiendoAudio(false);
     setImagenesPendientes([]);
     setPanelHistorial(false);
-    const meta: ConvMeta = {
-      conversation_id: next,
-      titulo: "Nueva conversación",
-      created_at: new Date().toISOString(),
-      total_mensajes: 0,
-    };
-    const prev = readConvIndex(currentUserId);
-    persistIndex([meta, ...prev.filter((c) => c.conversation_id !== next)].slice(0, 20));
-    writeMsgs(currentUserId, next, []);
-    try {
-      localStorage.setItem(lsActiveKey(currentUserId), next);
-    } catch {
-      /* ignore */
-    }
+    void fetchAgentConversations().then((list) => {
+      setConversaciones(mergeEphemeralIntoConversaciones(list, next, 0));
+    });
   };
 
   const seleccionarConversacion = (cid: string) => {
@@ -893,33 +945,53 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
       setPanelHistorial(false);
       return;
     }
-    setConversationId(cid);
     setPanelHistorial(false);
-    setHistorial(readMsgs(currentUserId, cid));
-    try {
-      localStorage.setItem(lsActiveKey(currentUserId), cid);
-    } catch {
-      /* ignore */
-    }
+    setConversationId(cid);
+    void (async () => {
+      try {
+        const rows = await fetchAgentMessages(cid);
+        setHistorial(rows.map(rowToChatMessage));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Error al cargar mensajes");
+      }
+    })();
   };
 
   const confirmarEliminarConversacion = (cid: string) => {
-    const nextList = readConvIndex(currentUserId).filter((c) => c.conversation_id !== cid);
-    persistIndex(nextList);
-    try {
-      localStorage.removeItem(lsMsgsKey(currentUserId, cid));
-    } catch {
-      /* ignore */
-    }
     setConfirmDeleteId(null);
-    if (conversationId === cid) {
-      if (nextList.length > 0) {
-        const first = nextList[0];
-        seleccionarConversacion(first.conversation_id);
-      } else {
-        nuevaConversacion();
+    void (async () => {
+      try {
+        await deleteAgentConversation(cid);
+        const list = await fetchAgentConversations();
+        if (conversationId === cid) {
+          if (list.length > 0) {
+            const first = list[0];
+            setConversationId(first.conversation_id);
+            const rows = await fetchAgentMessages(first.conversation_id);
+            setHistorial(rows.map(rowToChatMessage));
+            setConversaciones(
+              mergeEphemeralIntoConversaciones(list, first.conversation_id, rows.length),
+            );
+          } else {
+            const next = generateConversationId();
+            setHistorial([]);
+            setConversationId(next);
+            setConversaciones([
+              {
+                conversation_id: next,
+                titulo: "Nueva conversación",
+                created_at: new Date().toISOString(),
+                total_mensajes: 0,
+              },
+            ]);
+          }
+        } else {
+          setConversaciones(mergeEphemeralIntoConversaciones(list, conversationId, historial.length));
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "No se pudo eliminar la conversación");
       }
-    }
+    })();
   };
 
   const handleImagen = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -988,6 +1060,8 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
         padding: "10px 0",
         cursor: "pointer",
       };
+
+  if (!uid) return null;
 
   return (
     <div

@@ -52,6 +52,51 @@ export type Database = {
           },
         ]
       }
+      agent_messages: {
+        Row: {
+          id: string
+          family_id: string | null
+          user_id: string | null
+          conversation_id: string
+          role: string
+          content: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          family_id?: string | null
+          user_id?: string | null
+          conversation_id: string
+          role: string
+          content: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          family_id?: string | null
+          user_id?: string | null
+          conversation_id?: string
+          role?: string
+          content?: string
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_messages_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_messages_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       calendar_events: {
         Row: {
           created_at: string | null
