@@ -626,6 +626,33 @@ export type Database = {
           },
         ]
       }
+      kore_notifications: {
+        Row: {
+          created_at: string | null
+          id: string
+          message: string
+          slug: string
+          type: string
+          urgency: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          message: string
+          slug: string
+          type: string
+          urgency: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          message?: string
+          slug?: string
+          type?: string
+          urgency?: string
+        }
+        Relationships: []
+      }
       leisure_activities: {
         Row: {
           activity: string
