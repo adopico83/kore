@@ -5,6 +5,9 @@ import { sendKoreNotification } from "../_shared/notify.ts";
 const MIN_HOURS_PEQUE = 10;
 const PERSON_PEQUE = "Peque";
 
+/** Misma familia que en `src/lib/kore-db.ts` (filtro de agenda). */
+const FAMILY_ID = "8378283a-cfc0-46ec-90c0-07e45c885aee";
+
 /**
  * Devuelve el inicio del día actual en zona horaria Europe/Madrid
  * como ISO 8601 con offset (equivalente a:
@@ -36,6 +39,63 @@ function getStartOfTodayMadrid(): { startIso: string; dateMadrid: string } {
   return { startIso, dateMadrid };
 }
 
+/** Suma un día civil a `YYYY-MM-DD` (calendario gregoriano, coherente con la fecha ya en Madrid). */
+function addOneDayYmd(ymd: string): string {
+  const [yStr, mStr, dStr] = ymd.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const d = Number(dStr);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const yy = next.getUTCFullYear();
+  const mm = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(next.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+function formatAgendaTime(time: string | null): string {
+  if (time == null || time.trim() === "") return "--:--";
+  const t = time.trim();
+  const m = t.match(/^(\d{1,2}):(\d{2})/);
+  if (m) {
+    return `${m[1].padStart(2, "0")}:${m[2]}`;
+  }
+  return t;
+}
+
+type CalendarEventRow = {
+  title: string;
+  time: string | null;
+};
+
+/**
+ * Texto de vistazo de agenda para mañana (Madrid), o cadena vacía si no hay eventos o falla la consulta.
+ */
+async function buildTomorrowAgendaBlock(
+  supabase: ReturnType<typeof createClient>,
+  dateTomorrowMadrid: string,
+): Promise<string> {
+  const { data, error } = await supabase
+    .from("calendar_events")
+    .select("title, time")
+    .eq("family_id", FAMILY_ID)
+    .eq("date", dateTomorrowMadrid)
+    .order("time", { ascending: true, nullsFirst: false });
+
+  if (error) {
+    return "";
+  }
+
+  const events = (data ?? []) as CalendarEventRow[];
+  if (events.length === 0) {
+    return "";
+  }
+
+  const lines = events.map(
+    (ev) => `• ${formatAgendaTime(ev.time)} - ${ev.title}`,
+  );
+  return `📅 MAÑANA EN TU AGENDA:\n${lines.join("\n")}`;
+}
+
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -60,6 +120,7 @@ Deno.serve(async () => {
     });
 
     const { startIso, dateMadrid } = getStartOfTodayMadrid();
+    const dateTomorrowMadrid = addOneDayYmd(dateMadrid);
 
     const { data, error } = await supabase
       .from("sleep_logs")
@@ -78,6 +139,7 @@ Deno.serve(async () => {
 
     const rows = data ?? [];
 
+    let sleepMessage: string;
     let notification: {
       message: string;
       urgency: "alta" | "media" | "baja";
@@ -88,8 +150,9 @@ Deno.serve(async () => {
     let hoursSum = 0;
 
     if (rows.length === 0) {
+      sleepMessage = "No hay registro de sueño de Peque hoy";
       notification = {
-        message: "No hay registro de sueño de Peque hoy",
+        message: sleepMessage,
         urgency: "media",
         type: "sleep_check",
         slug: `sleep-olvido-${dateMadrid}`,
@@ -101,20 +164,27 @@ Deno.serve(async () => {
         : hoursSum.toFixed(1);
 
       if (hoursSum < MIN_HOURS_PEQUE) {
+        sleepMessage = `Peque ha dormido poco: ${hoursDisplay}h`;
         notification = {
-          message: `Peque ha dormido poco: ${hoursDisplay}h`,
+          message: sleepMessage,
           urgency: "alta",
           type: "sleep_check",
           slug: `sleep-anomalia-${dateMadrid}`,
         };
       } else {
+        sleepMessage = "Sueño de Peque correcto hoy";
         notification = {
-          message: "Sueño de Peque correcto hoy",
+          message: sleepMessage,
           urgency: "baja",
           type: "sleep_check",
           slug: `sleep-ok-${dateMadrid}`,
         };
       }
+    }
+
+    const agendaBlock = await buildTomorrowAgendaBlock(supabase, dateTomorrowMadrid);
+    if (agendaBlock) {
+      notification.message = `${sleepMessage}\n\n${agendaBlock}`;
     }
 
     const sent = await sendKoreNotification(notification);
