@@ -19,8 +19,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DomainHistoryEntry } from "@/components/DomainModal";
 import {
-  ANDER_ID,
-  LEIRE_ID,
   type CalendarEventRow,
   type Domain as KoreDomainRow,
   type Expense,
@@ -57,7 +55,7 @@ import { getWeeklyMenu } from "@/lib/actions/menu";
 import { getSleepLogs } from "@/lib/actions/sleep";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
-import { getFamilyContext } from "@/lib/family-utils";
+import { getFamilyContext, resolvePartnerProfile } from "@/lib/family-utils";
 import { BASE_DOMAINS } from "@/lib/domains-catalog";
 
 function avatarStressBorder(level: number): string {
@@ -496,6 +494,11 @@ export function HomeClient({
   const familyContext = useMemo(
     () => getFamilyContext(safeInitialProfiles, currentUserId),
     [safeInitialProfiles, currentUserId],
+  );
+
+  const corchoPartner = useMemo(
+    () => resolvePartnerProfile(familyContext.adults, currentUserId),
+    [familyContext.adults, currentUserId],
   );
 
   const loadProfiles = useCallback(async () => {
@@ -1974,10 +1977,18 @@ export function HomeClient({
       {showCorcho ? (
         <CorchoChat
           onClose={() => setShowCorcho(false)}
-          recipientName={(familyContext.adults ?? []).find((p) => p.id !== currentUserId)?.name ?? "tu pareja"}
+          currentUserId={currentUserId}
+          partnerUserId={corchoPartner?.id ?? ""}
+          recipientName={corchoPartner?.name ?? "tu pareja"}
         />
       ) : null}
-      {showCorchoHistorial ? <CorchoHistorial onClose={() => setShowCorchoHistorial(false)} /> : null}
+      {showCorchoHistorial ? (
+        <CorchoHistorial
+          onClose={() => setShowCorchoHistorial(false)}
+          currentUserId={currentUserId}
+          profiles={safeInitialProfiles}
+        />
+      ) : null}
       {showAgent && currentUserId ? (
         <AgentChat onClose={handleCloseAgentChat} currentUserId={currentUserId} />
       ) : null}

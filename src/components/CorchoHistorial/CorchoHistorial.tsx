@@ -3,13 +3,13 @@
 import { Play, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getKoreNotes } from "@/lib/actions/corcho";
-import { LEIRE_ID } from "@/lib/kore-db";
+import type { Profile } from "@/lib/kore-db";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 type FeedMessage = {
   id: string;
-  name: "Ander" | "Leire";
-  initial: "A" | "L";
+  name: string;
+  initial: string;
   avatarBorder: string;
   at: string;
   text: string;
@@ -27,9 +27,11 @@ function formatDateTime(iso: string) {
 
 export type CorchoHistorialProps = {
   onClose: () => void;
+  currentUserId: string;
+  profiles: Profile[];
 };
 
-export function CorchoHistorial({ onClose }: CorchoHistorialProps) {
+export function CorchoHistorial({ onClose, currentUserId, profiles }: CorchoHistorialProps) {
   useEscapeKey(onClose);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [feed, setFeed] = useState<FeedMessage[]>([]);
@@ -41,12 +43,15 @@ export function CorchoHistorial({ onClose }: CorchoHistorialProps) {
         const rows = await getKoreNotes();
         if (cancelled) return;
         const mapped: FeedMessage[] = rows.map((row) => {
-          const isAnder = row.sender_id !== LEIRE_ID;
+          const isMe = row.sender_id === currentUserId;
+          const profile = profiles.find((p) => p.id === row.sender_id);
+          const name = profile?.name?.trim() || "Familiar";
+          const initial = (name.charAt(0) || "?").toUpperCase();
           return {
             id: row.id,
-            name: isAnder ? "Ander" : "Leire",
-            initial: isAnder ? "A" : "L",
-            avatarBorder: isAnder ? "#10b981" : "#f59e0b",
+            name,
+            initial,
+            avatarBorder: isMe ? "#10b981" : "#f59e0b",
             at: row.created_at ?? "",
             text: String(row.content ?? ""),
           };
@@ -59,7 +64,7 @@ export function CorchoHistorial({ onClose }: CorchoHistorialProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentUserId, profiles]);
 
   return (
     <div

@@ -22,3 +22,10 @@ export function getFamilyContext(profiles: Profile[], currentUserId: string): Fa
 
   return { currentUser, adults, children, profileMap };
 }
+
+/** Primer adulto distinto del usuario (misma regla que el destinatario del Corcho en la home). */
+export function resolvePartnerProfile(adults: Profile[], currentUserId: string): Profile | null {
+  const id = currentUserId.trim();
+  if (!id) return null;
+  return adults.find((p) => p.id !== id) ?? null;
+}

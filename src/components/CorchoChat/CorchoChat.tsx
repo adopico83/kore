@@ -3,6 +3,7 @@
 import { History, Loader2, Paperclip, Trash2, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -14,7 +15,6 @@ import {
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 import { addKoreNote, getKoreNotes } from "@/lib/actions/corcho";
-import { ANDER_ID, LEIRE_ID } from "@/lib/kore-db";
 
 const GREEN = "#4CC9A0";
 const PURPLE = "#9B8FE8";
@@ -24,7 +24,7 @@ const CARD = "#161a22";
 
 const CORCHO_CONV_ID = "kore_corcho_global";
 
-type CorchoRole = "ander" | "leire";
+type CorchoRole = "me" | "partner";
 
 type CorchoMessage = {
   id: string;
@@ -136,10 +136,19 @@ function ConvRow({
 
 export type CorchoChatProps = {
   onClose: () => void;
+  /** Sesión: remitente de los mensajes que envía esta vista. */
+  currentUserId: string;
+  /** Perfil destinatario (otro adulto); obligatorio en BD para `recipient_id`. */
+  partnerUserId: string;
   recipientName?: string;
 };
 
-export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatProps) {
+export function CorchoChat({
+  onClose,
+  currentUserId,
+  partnerUserId,
+  recipientName = "tu pareja",
+}: CorchoChatProps) {
   useEscapeKey(onClose);
   const [mensaje, setMensaje] = useState("");
   const [conversationId, setConversationId] = useState("");
@@ -159,12 +168,14 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
   const mediaRecorderMimeTypeRef = useRef<string>("audio/webm");
   const micGestureHandledRef = useRef(false);
 
-  const loadMessages = async () => {
+  const canSendCorcho = Boolean(currentUserId.trim() && partnerUserId.trim());
+
+  const loadMessages = useCallback(async () => {
     const rows = await getKoreNotes();
     const latest = rows.slice(0, 50);
     const mapped: CorchoMessage[] = [...latest].reverse().map((row) => ({
       id: row.id,
-      role: row.sender_id === LEIRE_ID ? "leire" : "ander",
+      role: row.sender_id === currentUserId ? "me" : "partner",
       content: String(row.content ?? "").trim(),
       at: row.created_at ?? "",
     }));
@@ -180,11 +191,11 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
       },
     ]);
     setConversationId(CORCHO_CONV_ID);
-  };
+  }, [currentUserId]);
 
   useEffect(() => {
     void loadMessages();
-  }, []);
+  }, [loadMessages]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -246,9 +257,21 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
       setError("Escribe un mensaje o adjunta una imagen.");
       return;
     }
+    const uid = currentUserId.trim();
+    const pid = partnerUserId.trim();
+    if (!uid || !pid) {
+      setError(
+        !uid
+          ? "No hay sesión de usuario para enviar el mensaje."
+          : "No hay otro adulto en el hogar como destinatario. Completa el onboarding o añade a tu pareja.",
+      );
+      if (fromTranscription) setTranscribiendo(false);
+      return;
+    }
+
     const msg: CorchoMessage = {
       id: crypto.randomUUID?.() ?? `m_${Date.now()}`,
-      role: "ander",
+      role: "me",
       content: clean || (imagenes.length > 1 ? `📎 ${imagenes.length} imágenes` : "📎 Imagen"),
       imagenPreviews: imagenes.length ? imagenes.slice() : undefined,
       at: new Date().toISOString(),
@@ -256,8 +279,8 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
     const persistedText = msg.content;
     await addKoreNote({
       content: persistedText,
-      sender_id: ANDER_ID,
-      recipient_id: LEIRE_ID,
+      sender_id: uid,
+      recipient_id: pid,
       audio_url: null,
       status: "unread",
       priority: "low",
@@ -294,7 +317,7 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
   };
 
   const requestMicAndStartRecording = () => {
-    if (grabando || transcribiendo) return;
+    if (grabando || transcribiendo || !canSendCorcho) return;
     if (typeof MediaRecorder === "undefined") {
       setError("Tu navegador no soporta grabación de audio.");
       return;
@@ -457,21 +480,21 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
         ) : (
           <>
             {historial.map((msg) => {
-              const isAnder = msg.role === "ander";
+              const isMe = msg.role === "me";
               return (
-                <div key={msg.id} style={{ display: "flex", justifyContent: isAnder ? "flex-end" : "flex-start" }}>
+                <div key={msg.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start" }}>
                   <div style={{ maxWidth: "90%" }}>
                     <div
                       style={{
-                        borderRadius: isAnder ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
+                        borderRadius: isMe ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
                         padding: "8px 12px",
-                        background: isAnder ? GREEN : "#1c2028",
-                        color: isAnder ? "#0a1a14" : TEXT,
-                        border: isAnder ? "none" : `1px solid ${PURPLE}55`,
+                        background: isMe ? GREEN : "#1c2028",
+                        color: isMe ? "#0a1a14" : TEXT,
+                        border: isMe ? "none" : `1px solid ${PURPLE}55`,
                       }}
                     >
                       {(msg.imagenPreviews ?? []).length > 0 ? (
-                        <div style={{ marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 6, justifyContent: isAnder ? "flex-end" : "flex-start" }}>
+                        <div style={{ marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 6, justifyContent: isMe ? "flex-end" : "flex-start" }}>
                           {(msg.imagenPreviews ?? []).map((src, idx) => (
                             <img key={`${msg.id}-${idx}`} src={src} alt="" style={{ maxHeight: 112, maxWidth: "45%", borderRadius: 6, border: "1px solid rgba(0,0,0,0.2)", objectFit: "cover" }} />
                           ))}
@@ -479,7 +502,7 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
                       ) : null}
                       <p style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 14 }}>{msg.content}</p>
                     </div>
-                    <p style={{ margin: "4px 0 0", textAlign: isAnder ? "right" : "left", fontSize: 10, color: "rgba(255,255,255,0.45)" }}>
+                    <p style={{ margin: "4px 0 0", textAlign: isMe ? "right" : "left", fontSize: 10, color: "rgba(255,255,255,0.45)" }}>
                       {formatHHMM(msg.at)}
                     </p>
                   </div>
@@ -546,8 +569,11 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
           <button
             type="button"
             onClick={handleEnviar}
-            {...touchEnd(handleEnviar, transcribiendo || grabando || (mensaje.trim().length === 0 && imagenesPendientes.length === 0))}
-            disabled={transcribiendo || grabando || (mensaje.trim().length === 0 && imagenesPendientes.length === 0)}
+            {...touchEnd(
+              handleEnviar,
+              transcribiendo || grabando || !canSendCorcho || (mensaje.trim().length === 0 && imagenesPendientes.length === 0),
+            )}
+            disabled={transcribiendo || grabando || !canSendCorcho || (mensaje.trim().length === 0 && imagenesPendientes.length === 0)}
             style={{ flex: 1, minWidth: 0, borderRadius: 8, border: "none", background: GREEN, color: "#0a1a14", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
           >
             Enviar
@@ -555,8 +581,8 @@ export function CorchoChat({ onClose, recipientName = "tu pareja" }: CorchoChatP
           <button
             type="button"
             aria-label={grabando ? "Detener grabación" : "Grabar audio"}
-            onPointerDown={handleMicPointerDown(transcribiendo)}
-            onClick={handleMicClick(transcribiendo)}
+            onPointerDown={handleMicPointerDown(transcribiendo || !canSendCorcho)}
+            onClick={handleMicClick(transcribiendo || !canSendCorcho)}
             style={{
               display: "flex",
               width: 44,
