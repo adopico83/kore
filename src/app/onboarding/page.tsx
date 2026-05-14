@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
 import { completeOnboardingAction } from "@/lib/actions/onboarding";
 import { parseFamilyPeopleForOnboarding } from "@/lib/actions/extract-family-members";
 import { BASE_DOMAINS, type DomainName } from "@/lib/domains-catalog";
+import { OnboardingFamilyGate } from "./OnboardingFamilyGate";
 
 type ChatMessage = { id: string; role: "assistant" | "user"; content: string };
 type OnboardingMode = "none" | "newborn" | "guided";
@@ -82,6 +83,30 @@ async function parseFamilyPeople(input: string): Promise<{ partnerName: string; 
 }
 
 export default function OnboardingPage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: "100dvh",
+            background: "#090b10",
+            color: "#e4e6ed",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 16,
+          }}
+        >
+          <p style={{ margin: 0, color: "rgba(228,230,237,0.75)" }}>Cargando…</p>
+        </main>
+      }
+    >
+      <OnboardingPageContent />
+    </Suspense>
+  );
+}
+
+function OnboardingPageContent() {
   const router = useRouter();
   const lastProcessedStep = useRef(0);
   const [mode, setMode] = useState<OnboardingMode>("none");
@@ -97,6 +122,23 @@ export default function OnboardingPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  const [familyAccess, setFamilyAccess] = useState<"loading" | "none" | "ok">("loading");
+
+  useEffect(() => {
+    void (async () => {
+      const supabase = getBrowserClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setFamilyAccess("none");
+        return;
+      }
+      const { data: profile } = await supabase.from("profiles").select("family_id").eq("id", user.id).maybeSingle();
+      setFamilyAccess(profile?.family_id ? "ok" : "none");
+    })();
+  }, []);
 
   useEffect(() => {
     if (mode === "none") {
@@ -257,6 +299,48 @@ export default function OnboardingPage() {
       setSubmitting(false);
     }
   };
+
+  if (familyAccess === "loading") {
+    return (
+      <main
+        style={{
+          minHeight: "100dvh",
+          background: "#090b10",
+          color: "#e4e6ed",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 16,
+        }}
+      >
+        <p style={{ margin: 0, color: "rgba(228,230,237,0.75)" }}>Cargando…</p>
+      </main>
+    );
+  }
+
+  if (familyAccess === "none") {
+    return (
+      <main
+        style={{
+          minHeight: "100dvh",
+          background: "#090b10",
+          color: "#e4e6ed",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 16,
+        }}
+      >
+        <Suspense
+          fallback={
+            <p style={{ margin: 0, color: "rgba(228,230,237,0.75)" }}>Cargando…</p>
+          }
+        >
+          <OnboardingFamilyGate />
+        </Suspense>
+      </main>
+    );
+  }
 
   return (
     <main

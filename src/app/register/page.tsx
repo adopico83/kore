@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
 import { registerFamilyAction } from "@/lib/actions/register";
 
@@ -93,7 +93,34 @@ function LoginSineCanvas() {
 }
 
 export default function RegisterPage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: "100dvh",
+            backgroundColor: "#0d1117",
+            color: "#e4e6ed",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <p style={{ margin: 0, fontFamily: "var(--font-dm-sans), sans-serif" }}>Cargando…</p>
+        </main>
+      }
+    >
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [inviteCode, setInviteCode] = useState(() => searchParams.get("invite")?.trim() ?? "");
+
+  const isJoinInvite = inviteCode.trim().length > 0;
   const [familyName, setFamilyName] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [email, setEmail] = useState("");
@@ -110,11 +137,14 @@ export default function RegisterPage() {
 
     try {
       const supabase = getBrowserClient();
+      const inviteTrimmed = inviteCode.trim();
+      const joinWithInvite = inviteTrimmed.length > 0;
       const registerResult = await registerFamilyAction(
         email.trim(),
         password,
-        familyName.trim(),
+        joinWithInvite ? "—" : familyName.trim(),
         ownerName.trim(),
+        joinWithInvite ? { inviteCode: inviteTrimmed } : undefined,
       );
       if ("error" in registerResult) {
         setError(registerResult.error);
@@ -196,7 +226,7 @@ export default function RegisterPage() {
               color: "#e4e6ed",
             }}
           >
-            Crear familia
+            {isJoinInvite ? "Unirte al hogar" : "Crear familia"}
           </h1>
           <p
             style={{
@@ -208,7 +238,7 @@ export default function RegisterPage() {
               color: "rgba(228,230,237,0.7)",
             }}
           >
-            alta inicial de hogar
+            {isJoinInvite ? "registro con código de invitación" : "alta inicial de hogar"}
           </p>
         </section>
 
@@ -234,26 +264,28 @@ export default function RegisterPage() {
               gap: 12,
             }}
           >
-            <input
-              type="text"
-              placeholder="Nombre de la familia"
-              value={familyName}
-              onChange={(e) => setFamilyName(e.target.value)}
-              required
-              style={{
-                width: "100%",
-                minHeight: 46,
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.14)",
-                background: "#121622",
-                color: "#e4e6ed",
-                padding: "11px 12px",
-                fontSize: 16,
-                fontFamily: "var(--font-dm-sans), sans-serif",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
+            {!isJoinInvite ? (
+              <input
+                type="text"
+                placeholder="Nombre de la familia"
+                value={familyName}
+                onChange={(e) => setFamilyName(e.target.value)}
+                required
+                style={{
+                  width: "100%",
+                  minHeight: 46,
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: "#121622",
+                  color: "#e4e6ed",
+                  padding: "11px 12px",
+                  fontSize: 16,
+                  fontFamily: "var(--font-dm-sans), sans-serif",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            ) : null}
 
             <input
               type="text"
@@ -321,6 +353,39 @@ export default function RegisterPage() {
               }}
             />
 
+            <input
+              type="text"
+              placeholder="Código de invitación (ej: KORE-A3X9)"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              autoCapitalize="characters"
+              spellCheck={false}
+              style={{
+                width: "100%",
+                minHeight: 46,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "#121622",
+                color: "#e4e6ed",
+                padding: "11px 12px",
+                fontSize: 16,
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+            <p
+              style={{
+                margin: "-4px 2px 0",
+                fontSize: 12,
+                lineHeight: 1.35,
+                color: "rgba(228,230,237,0.62)",
+                fontFamily: "var(--font-dm-sans), sans-serif",
+              }}
+            >
+              ¿Te han invitado? Introduce el código para unirte a su familia
+            </p>
+
             <button
               type="submit"
               disabled={submitting}
@@ -339,7 +404,7 @@ export default function RegisterPage() {
                 opacity: submitting ? 0.7 : 1,
               }}
             >
-              {submitting ? "Creando..." : "Crear familia"}
+              {submitting ? "Creando..." : isJoinInvite ? "Crear cuenta y unirme" : "Crear familia"}
             </button>
 
             {error ? (

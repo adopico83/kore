@@ -1,0 +1,1182 @@
+diff --git a/next-env.d.ts b/next-env.d.ts
+index c4b7818..9edff1c 100644
+--- a/next-env.d.ts
++++ b/next-env.d.ts
+@@ -1,6 +1,6 @@
+ /// <reference types="next" />
+ /// <reference types="next/image-types/global" />
+-import "./.next/dev/types/routes.d.ts";
++import "./.next/types/routes.d.ts";
+ 
+ // NOTE: This file should not be edited
+ // see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+diff --git a/src/__tests__/middleware-proxy.test.ts b/src/__tests__/middleware-proxy.test.ts
+index 959e81c..7667b15 100644
+--- a/src/__tests__/middleware-proxy.test.ts
++++ b/src/__tests__/middleware-proxy.test.ts
+@@ -7,30 +7,34 @@ vi.mock("@supabase/ssr", () => ({
+   createServerClient: mockCreateServerClient,
+ }));
+ 
+-function withSession(session: unknown) {
+-  const state = { table: "" };
++type SessionOpts = {
++  familyId: string | null;
++  onboardingStep?: string | null;
++};
++
++function mockSupabaseForSession(session: unknown, opts?: SessionOpts) {
++  const familyId = opts && "familyId" in opts ? opts.familyId : "family-1";
++  const onboardingStep = opts?.onboardingStep ?? "completed";
++
+   mockCreateServerClient.mockReturnValue({
+     auth: {
+       getSession: vi.fn(async () => ({ data: { session } })),
+     },
+-    from: vi.fn((table: string) => {
+-      state.table = table;
+-      return {
+-        select: vi.fn(() => ({
+-          eq: vi.fn(() => ({
+-            maybeSingle: vi.fn(async () => {
+-              if (state.table === "profiles") {
+-                return { data: { family_id: "family-1" } };
+-              }
+-              if (state.table === "families") {
+-                return { data: { onboarding_step: "completed" } };
+-              }
+-              return { data: null };
+-            }),
+-          })),
++    from: vi.fn((table: string) => ({
++      select: vi.fn(() => ({
++        eq: vi.fn(() => ({
++          maybeSingle: vi.fn(async () => {
++            if (table === "profiles") {
++              return { data: { family_id: familyId } };
++            }
++            if (table === "families") {
++              return { data: { onboarding_step: onboardingStep } };
++            }
++            return { data: null };
++          }),
+         })),
+-      };
+-    }),
++      })),
++    })),
+   });
+ }
+ 
+@@ -42,7 +46,7 @@ describe("proxy route protection", () => {
+   });
+ 
+   it("redirige a /login sin sesión en ruta protegida", async () => {
+-    withSession(null);
++    mockSupabaseForSession(null);
+     const { proxy } = await import("@/proxy");
+     const req = new NextRequest("http://localhost/dashboard");
+ 
+@@ -53,7 +57,7 @@ describe("proxy route protection", () => {
+   });
+ 
+   it("deja pasar /login sin sesión", async () => {
+-    withSession(null);
++    mockSupabaseForSession(null);
+     const { proxy } = await import("@/proxy");
+     const req = new NextRequest("http://localhost/login");
+ 
+@@ -64,7 +68,7 @@ describe("proxy route protection", () => {
+   });
+ 
+   it("redirige a / si hay sesión en /login", async () => {
+-    withSession({ user: { id: "u1" } });
++    mockSupabaseForSession({ user: { id: "u1" } });
+     const { proxy } = await import("@/proxy");
+     const req = new NextRequest("http://localhost/login");
+ 
+@@ -74,8 +78,8 @@ describe("proxy route protection", () => {
+     expect(res.headers.get("location")).toBe("http://localhost/");
+   });
+ 
+-  it("deja pasar ruta protegida cuando hay sesión activa", async () => {
+-    withSession({ user: { id: "u1" } });
++  it("deja pasar ruta protegida cuando hay sesión y familia", async () => {
++    mockSupabaseForSession({ user: { id: "u1" } }, { familyId: "family-1" });
+     const { proxy } = await import("@/proxy");
+     const req = new NextRequest("http://localhost/dashboard");
+ 
+@@ -84,4 +88,48 @@ describe("proxy route protection", () => {
+     expect(res.status).toBe(200);
+     expect(res.headers.get("location")).toBeNull();
+   });
++
++  it("sin family_id redirige a /onboarding desde rutas protegidas", async () => {
++    mockSupabaseForSession({ user: { id: "u1" } }, { familyId: null });
++    const { proxy } = await import("@/proxy");
++    const req = new NextRequest("http://localhost/dashboard");
++
++    const res = await proxy(req);
++
++    expect(res.status).toBe(307);
++    expect(res.headers.get("location")).toBe("http://localhost/onboarding");
++  });
++
++  it("sin family_id permite /onboarding", async () => {
++    mockSupabaseForSession({ user: { id: "u1" } }, { familyId: null });
++    const { proxy } = await import("@/proxy");
++    const req = new NextRequest("http://localhost/onboarding");
++
++    const res = await proxy(req);
++
++    expect(res.status).toBe(200);
++    expect(res.headers.get("location")).toBeNull();
++  });
++
++  it("onboarding completado redirige /onboarding a /", async () => {
++    mockSupabaseForSession({ user: { id: "u1" } }, { familyId: "f1", onboardingStep: "completed" });
++    const { proxy } = await import("@/proxy");
++    const req = new NextRequest("http://localhost/onboarding");
++
++    const res = await proxy(req);
++
++    expect(res.status).toBe(307);
++    expect(res.headers.get("location")).toBe("http://localhost/");
++  });
++
++  it("onboarding pendiente deja /onboarding", async () => {
++    mockSupabaseForSession({ user: { id: "u1" } }, { familyId: "f1", onboardingStep: "pending" });
++    const { proxy } = await import("@/proxy");
++    const req = new NextRequest("http://localhost/onboarding");
++
++    const res = await proxy(req);
++
++    expect(res.status).toBe(200);
++    expect(res.headers.get("location")).toBeNull();
++  });
+ });
+diff --git a/src/app/onboarding/page.tsx b/src/app/onboarding/page.tsx
+index a2ae3ae..37b6c3d 100644
+--- a/src/app/onboarding/page.tsx
++++ b/src/app/onboarding/page.tsx
+@@ -1,11 +1,12 @@
+ "use client";
+ 
+-import { FormEvent, useEffect, useRef, useState } from "react";
++import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import { getBrowserClient } from "@/lib/supabase/client";
+ import { completeOnboardingAction } from "@/lib/actions/onboarding";
+ import { parseFamilyPeopleForOnboarding } from "@/lib/actions/extract-family-members";
+ import { BASE_DOMAINS, type DomainName } from "@/lib/domains-catalog";
++import { OnboardingFamilyGate } from "./OnboardingFamilyGate";
+ 
+ type ChatMessage = { id: string; role: "assistant" | "user"; content: string };
+ type OnboardingMode = "none" | "newborn" | "guided";
+@@ -82,6 +83,30 @@ async function parseFamilyPeople(input: string): Promise<{ partnerName: string;
+ }
+ 
+ export default function OnboardingPage() {
++  return (
++    <Suspense
++      fallback={
++        <main
++          style={{
++            minHeight: "100dvh",
++            background: "#090b10",
++            color: "#e4e6ed",
++            display: "flex",
++            justifyContent: "center",
++            alignItems: "center",
++            padding: 16,
++          }}
++        >
++          <p style={{ margin: 0, color: "rgba(228,230,237,0.75)" }}>Cargando…</p>
++        </main>
++      }
++    >
++      <OnboardingPageContent />
++    </Suspense>
++  );
++}
++
++function OnboardingPageContent() {
+   const router = useRouter();
+   const lastProcessedStep = useRef(0);
+   const [mode, setMode] = useState<OnboardingMode>("none");
+@@ -98,6 +123,23 @@ export default function OnboardingPage() {
+   const [submitting, setSubmitting] = useState(false);
+   const [error, setError] = useState("");
+ 
++  const [familyAccess, setFamilyAccess] = useState<"loading" | "none" | "ok">("loading");
++
++  useEffect(() => {
++    void (async () => {
++      const supabase = getBrowserClient();
++      const {
++        data: { user },
++      } = await supabase.auth.getUser();
++      if (!user) {
++        setFamilyAccess("none");
++        return;
++      }
++      const { data: profile } = await supabase.from("profiles").select("family_id").eq("id", user.id).maybeSingle();
++      setFamilyAccess(profile?.family_id ? "ok" : "none");
++    })();
++  }, []);
++
+   useEffect(() => {
+     if (mode === "none") {
+       lastProcessedStep.current = 0;
+@@ -258,6 +300,48 @@ export default function OnboardingPage() {
+     }
+   };
+ 
++  if (familyAccess === "loading") {
++    return (
++      <main
++        style={{
++          minHeight: "100dvh",
++          background: "#090b10",
++          color: "#e4e6ed",
++          display: "flex",
++          justifyContent: "center",
++          alignItems: "center",
++          padding: 16,
++        }}
++      >
++        <p style={{ margin: 0, color: "rgba(228,230,237,0.75)" }}>Cargando…</p>
++      </main>
++    );
++  }
++
++  if (familyAccess === "none") {
++    return (
++      <main
++        style={{
++          minHeight: "100dvh",
++          background: "#090b10",
++          color: "#e4e6ed",
++          display: "flex",
++          justifyContent: "center",
++          alignItems: "center",
++          padding: 16,
++        }}
++      >
++        <Suspense
++          fallback={
++            <p style={{ margin: 0, color: "rgba(228,230,237,0.75)" }}>Cargando…</p>
++          }
++        >
++          <OnboardingFamilyGate />
++        </Suspense>
++      </main>
++    );
++  }
++
+   return (
+     <main
+       style={{
+diff --git a/src/app/register/page.tsx b/src/app/register/page.tsx
+index 7552cb3..1467d6f 100644
+--- a/src/app/register/page.tsx
++++ b/src/app/register/page.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ 
+-import { FormEvent, useEffect, useRef, useState } from "react";
+-import { useRouter } from "next/navigation";
++import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
++import { useRouter, useSearchParams } from "next/navigation";
+ import { getBrowserClient } from "@/lib/supabase/client";
+ import { registerFamilyAction } from "@/lib/actions/register";
+ 
+@@ -93,7 +93,33 @@ function LoginSineCanvas() {
+ }
+ 
+ export default function RegisterPage() {
++  return (
++    <Suspense
++      fallback={
++        <main
++          style={{
++            minHeight: "100dvh",
++            backgroundColor: "#0d1117",
++            color: "#e4e6ed",
++            display: "flex",
++            alignItems: "center",
++            justifyContent: "center",
++          }}
++        >
++          <p style={{ margin: 0, fontFamily: "var(--font-dm-sans), sans-serif" }}>Cargando…</p>
++        </main>
++      }
++    >
++      <RegisterForm />
++    </Suspense>
++  );
++}
++
++function RegisterForm() {
+   const router = useRouter();
++  const searchParams = useSearchParams();
++  const inviteFromUrl = searchParams.get("invite");
++  const isJoinInvite = Boolean(inviteFromUrl?.trim());
+   const [familyName, setFamilyName] = useState("");
+   const [ownerName, setOwnerName] = useState("");
+   const [email, setEmail] = useState("");
+@@ -113,8 +139,9 @@ export default function RegisterPage() {
+       const registerResult = await registerFamilyAction(
+         email.trim(),
+         password,
+-        familyName.trim(),
++        isJoinInvite ? "—" : familyName.trim(),
+         ownerName.trim(),
++        isJoinInvite ? { inviteCode: inviteFromUrl! } : undefined,
+       );
+       if ("error" in registerResult) {
+         setError(registerResult.error);
+@@ -196,7 +223,7 @@ export default function RegisterPage() {
+               color: "#e4e6ed",
+             }}
+           >
+-            Crear familia
++            {isJoinInvite ? "Unirte al hogar" : "Crear familia"}
+           </h1>
+           <p
+             style={{
+@@ -208,7 +235,7 @@ export default function RegisterPage() {
+               color: "rgba(228,230,237,0.7)",
+             }}
+           >
+-            alta inicial de hogar
++            {isJoinInvite ? "registro con código de invitación" : "alta inicial de hogar"}
+           </p>
+         </section>
+ 
+@@ -234,26 +261,42 @@ export default function RegisterPage() {
+               gap: 12,
+             }}
+           >
+-            <input
+-              type="text"
+-              placeholder="Nombre de la familia"
+-              value={familyName}
+-              onChange={(e) => setFamilyName(e.target.value)}
+-              required
+-              style={{
+-                width: "100%",
+-                minHeight: 46,
+-                borderRadius: 10,
+-                border: "1px solid rgba(255,255,255,0.14)",
+-                background: "#121622",
+-                color: "#e4e6ed",
+-                padding: "11px 12px",
+-                fontSize: 16,
+-                fontFamily: "var(--font-dm-sans), sans-serif",
+-                outline: "none",
+-                boxSizing: "border-box",
+-              }}
+-            />
++            {isJoinInvite ? (
++              <p
++                style={{
++                  margin: 0,
++                  padding: "10px 12px",
++                  borderRadius: 10,
++                  border: "1px solid rgba(76,201,160,0.35)",
++                  background: "rgba(76,201,160,0.08)",
++                  fontSize: 14,
++                  color: "rgba(228,230,237,0.92)",
++                }}
++              >
++                Código: <span style={{ fontWeight: 700, letterSpacing: "0.06em" }}>{inviteFromUrl}</span>
++              </p>
++            ) : (
++              <input
++                type="text"
++                placeholder="Nombre de la familia"
++                value={familyName}
++                onChange={(e) => setFamilyName(e.target.value)}
++                required
++                style={{
++                  width: "100%",
++                  minHeight: 46,
++                  borderRadius: 10,
++                  border: "1px solid rgba(255,255,255,0.14)",
++                  background: "#121622",
++                  color: "#e4e6ed",
++                  padding: "11px 12px",
++                  fontSize: 16,
++                  fontFamily: "var(--font-dm-sans), sans-serif",
++                  outline: "none",
++                  boxSizing: "border-box",
++                }}
++              />
++            )}
+ 
+             <input
+               type="text"
+@@ -339,7 +382,7 @@ export default function RegisterPage() {
+                 opacity: submitting ? 0.7 : 1,
+               }}
+             >
+-              {submitting ? "Creando..." : "Crear familia"}
++              {submitting ? "Creando..." : isJoinInvite ? "Crear cuenta y unirme" : "Crear familia"}
+             </button>
+ 
+             {error ? (
+diff --git a/src/lib/actions/register.ts b/src/lib/actions/register.ts
+index 02685d4..d4cecd9 100644
+--- a/src/lib/actions/register.ts
++++ b/src/lib/actions/register.ts
+@@ -2,21 +2,48 @@
+ 
+ import { createAdminClient } from "@/lib/supabase/admin";
+ import { BASE_DOMAINS } from "@/lib/domains-catalog";
+-
+-function generateInviteCode(): string {
+-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+-  const part = (len: number) =>
+-    Array.from({ length: len }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+-  return `KORE-${part(4)}-${part(2)}`;
+-}
++import { generateInviteCode, parseInviteCodeFromInput } from "@/lib/invite-code";
+ 
+ type RegisterFamilyResult = { success: true } | { error: string };
+ 
++type RegisterFamilyOptions = {
++  inviteCode?: string | null;
++};
++
++async function insertFamilyWithUniqueInvite(
++  admin: ReturnType<typeof createAdminClient>,
++  familyName: string,
++): Promise<{ id: string } | { error: string }> {
++  for (let attempt = 0; attempt < 12; attempt += 1) {
++    const invite_code = generateInviteCode();
++    const { data, error } = await admin
++      .from("families")
++      .insert({
++        name: familyName,
++        invite_code,
++        onboarding_step: "pending",
++      })
++      .select("id")
++      .single();
++
++    if (!error && data?.id) {
++      return { id: data.id };
++    }
++    const msg = (error?.message ?? "").toLowerCase();
++    if (msg.includes("duplicate") || msg.includes("unique") || error?.code === "23505") {
++      continue;
++    }
++    return { error: error?.message || "No se pudo crear la familia." };
++  }
++  return { error: "No se pudo generar un código de invitación único." };
++}
++
+ export async function registerFamilyAction(
+   email: string,
+   password: string,
+   familyName: string,
+   ownerName: string,
++  options?: RegisterFamilyOptions,
+ ): Promise<RegisterFamilyResult> {
+   const admin = createAdminClient();
+   let createdUserId: string | null = null;
+@@ -38,24 +65,32 @@ export async function registerFamilyAction(
+ 
+     createdUserId = createdUserData.user.id;
+ 
+-    const { data: family, error: familyError } = await admin
+-      .from("families")
+-      .insert({
+-        name: normalizedFamilyName,
+-        invite_code: generateInviteCode(),
+-        onboarding_step: "pending",
+-      })
+-      .select("id")
+-      .single();
+-    console.log("[registerFamilyAction] INSERT families", {
+-      familyName: normalizedFamilyName,
+-      familyId: family?.id ?? null,
+-      error: familyError?.message ?? null,
+-    });
++    const invite = parseInviteCodeFromInput(options?.inviteCode ?? "");
++
++    if (invite) {
++      const { data: familyRow, error: famLookupErr } = await admin.from("families").select("id").eq("invite_code", invite).maybeSingle();
++      if (famLookupErr || !familyRow?.id) {
++        throw new Error("El código de invitación no es válido.");
++      }
++
++      const { error: profileError } = await admin.from("profiles").insert({
++        id: createdUserId,
++        name: normalizedOwnerName,
++        family_id: familyRow.id,
++        role: "member",
++      });
++      if (profileError) {
++        throw new Error(profileError.message || "No se pudo crear el perfil.");
++      }
++
++      return { success: true };
++    }
+ 
+-    if (familyError || !family?.id) {
+-      throw new Error(familyError?.message || "No se pudo crear la familia.");
++    const inserted = await insertFamilyWithUniqueInvite(admin, normalizedFamilyName);
++    if ("error" in inserted) {
++      throw new Error(inserted.error);
+     }
++    const family = { id: inserted.id };
+ 
+     const { error: profileError } = await admin.from("profiles").insert({
+       id: createdUserId,
+@@ -63,22 +98,11 @@ export async function registerFamilyAction(
+       family_id: family.id,
+       role: "owner",
+     });
+-    console.log("[registerFamilyAction] INSERT profiles owner", {
+-      ownerId: createdUserId,
+-      ownerName: normalizedOwnerName,
+-      familyId: family.id,
+-      error: profileError?.message ?? null,
+-    });
+-
+     if (profileError) {
+       throw new Error(profileError.message || "No se pudo crear el perfil owner.");
+     }
+ 
+-    const { error: familyOwnerError } = await admin
+-      .from("families")
+-      .update({ owner_id: createdUserId })
+-      .eq("id", family.id);
+-
++    const { error: familyOwnerError } = await admin.from("families").update({ owner_id: createdUserId }).eq("id", family.id);
+     if (familyOwnerError) {
+       throw new Error(familyOwnerError.message || "No se pudo asignar owner a la familia.");
+     }
+@@ -92,22 +116,6 @@ export async function registerFamilyAction(
+         is_active: false,
+       })),
+     );
+-    console.log("[registerFamilyAction] INSERT domains base", {
+-      familyId: family.id,
+-      domainsCount: BASE_DOMAINS.length,
+-      error: domainsError?.message ?? null,
+-    });
+-
+-    // Pareja e hijos no se crean en el registro: se crean durante onboarding.
+-    console.log("[registerFamilyAction] INSERT profiles pareja", {
+-      skipped: true,
+-      reason: "se crean en onboarding",
+-    });
+-    console.log("[registerFamilyAction] INSERT profiles hijos", {
+-      skipped: true,
+-      reason: "se crean en onboarding",
+-    });
+-
+     if (domainsError) {
+       throw new Error(domainsError.message || "No se pudieron crear los dominios base.");
+     }
+diff --git a/src/proxy.ts b/src/proxy.ts
+index cee224b..1d7ce13 100644
+--- a/src/proxy.ts
++++ b/src/proxy.ts
+@@ -27,12 +27,16 @@ export async function proxy(request: NextRequest) {
+ 
+   const { pathname } = request.nextUrl;
+   const isAuthPage = pathname === "/login" || pathname === "/register";
++  const isOnboarding = pathname === "/onboarding";
+ 
+-  if (!session && !isAuthPage) {
+-    const redirectUrl = request.nextUrl.clone();
+-    redirectUrl.pathname = "/login";
+-    redirectUrl.search = "";
+-    return NextResponse.redirect(redirectUrl);
++  if (!session) {
++    if (!isAuthPage) {
++      const redirectUrl = request.nextUrl.clone();
++      redirectUrl.pathname = "/login";
++      redirectUrl.search = "";
++      return NextResponse.redirect(redirectUrl);
++    }
++    return response;
+   }
+ 
+   if (session && isAuthPage) {
+@@ -42,6 +46,39 @@ export async function proxy(request: NextRequest) {
+     return NextResponse.redirect(redirectUrl);
+   }
+ 
++  const { data: profile } = await supabase
++    .from("profiles")
++    .select("family_id")
++    .eq("id", session.user.id)
++    .maybeSingle();
++
++  const familyId = profile?.family_id ?? null;
++
++  if (!familyId) {
++    if (!isOnboarding) {
++      const redirectUrl = request.nextUrl.clone();
++      redirectUrl.pathname = "/onboarding";
++      redirectUrl.search = "";
++      return NextResponse.redirect(redirectUrl);
++    }
++    return response;
++  }
++
++  if (isOnboarding) {
++    const { data: family } = await supabase
++      .from("families")
++      .select("onboarding_step")
++      .eq("id", familyId)
++      .maybeSingle();
++    const step = family?.onboarding_step ?? null;
++    if (step && step !== "pending") {
++      const redirectUrl = request.nextUrl.clone();
++      redirectUrl.pathname = "/";
++      redirectUrl.search = "";
++      return NextResponse.redirect(redirectUrl);
++    }
++  }
++
+   return response;
+ }
+ 
+
+diff --git a/src/lib/invite-code.ts b/src/lib/invite-code.ts
+new file mode 100644
+index 0000000..647d1b4
+--- /dev/null
++++ b/src/lib/invite-code.ts
+@@ -0,0 +1,32 @@
++import { randomInt } from "node:crypto";
++
++/** Alfabeto legible por voz (sin O/0 confundibles). */
++const INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
++
++/** Formato `KORE-` + 4 caracteres (p. ej. `KORE-A3X9`). */
++export function generateInviteCode(): string {
++  let body = "";
++  for (let i = 0; i < 4; i += 1) {
++    body += INVITE_ALPHABET[randomInt(INVITE_ALPHABET.length)]!;
++  }
++  return `KORE-${body}`;
++}
++
++export function normalizeInviteCode(raw: string): string {
++  return raw.replace(/^kore[-\s]*/i, "").replace(/[-\s]/g, "").toUpperCase();
++}
++
++/** Acepta `KORE-A3X9`, `kore-a3x9`, `A3X9` (se normaliza a 4 letras+dígitos del alfabeto). */
++export function parseInviteCodeFromInput(raw: string): string | null {
++  const trimmed = (raw ?? "").trim();
++  if (!trimmed) return null;
++  if (/^kore-/i.test(trimmed)) {
++    const m = trimmed.match(/^kore-([A-Z2-9]{4})$/i);
++    return m ? `KORE-${m[1]!.toUpperCase()}` : null;
++  }
++  const compact = normalizeInviteCode(trimmed);
++  if (compact.length === 4 && /^[A-Z2-9]{4}$/.test(compact)) {
++    return `KORE-${compact}`;
++  }
++  return null;
++}
+
+diff --git a/src/lib/actions/family-setup.ts b/src/lib/actions/family-setup.ts
+new file mode 100644
+index 0000000..0bb98e6
+--- /dev/null
++++ b/src/lib/actions/family-setup.ts
+@@ -0,0 +1,174 @@
++"use server";
++
++import { createAdminClient } from "@/lib/supabase/admin";
++import { createClient } from "@/lib/supabase/server";
++import { BASE_DOMAINS } from "@/lib/domains-catalog";
++import { generateInviteCode, parseInviteCodeFromInput } from "@/lib/invite-code";
++
++type Ok = { success: true; familyId: string };
++type Err = { success: false; error: string };
++
++async function insertFamilyWithUniqueInvite(
++  admin: ReturnType<typeof createAdminClient>,
++  familyName: string,
++): Promise<{ id: string } | { error: string }> {
++  for (let attempt = 0; attempt < 12; attempt += 1) {
++    const invite_code = generateInviteCode();
++    const { data, error } = await admin
++      .from("families")
++      .insert({
++        name: familyName,
++        invite_code,
++        onboarding_step: "pending",
++      })
++      .select("id")
++      .single();
++
++    if (!error && data?.id) {
++      return { id: data.id };
++    }
++    const msg = (error?.message ?? "").toLowerCase();
++    if (msg.includes("duplicate") || msg.includes("unique") || error?.code === "23505") {
++      continue;
++    }
++    return { error: error?.message || "No se pudo crear la familia." };
++  }
++  return { error: "No se pudo generar un código de invitación único." };
++}
++
++/** Usuario autenticado sin `family_id`: crea hogar, dominios base y perfil owner. */
++export async function createFamilyForCurrentUserAction(
++  familyDisplayName: string,
++  ownerDisplayName: string,
++): Promise<Ok | Err> {
++  const name = familyDisplayName.trim();
++  const ownerName = ownerDisplayName.trim();
++  if (!name) return { success: false, error: "El nombre de la familia es obligatorio." };
++  if (!ownerName) return { success: false, error: "Tu nombre es obligatorio." };
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user?.id) return { success: false, error: "No hay sesión activa." };
++
++  const admin = createAdminClient();
++
++  const { data: existing, error: readErr } = await admin.from("profiles").select("id,family_id").eq("id", user.id).maybeSingle();
++  if (readErr) {
++    return { success: false, error: readErr.message || "No se pudo leer el perfil." };
++  }
++  if (existing?.family_id) {
++    return { success: false, error: "Ya perteneces a una familia." };
++  }
++
++  const inserted = await insertFamilyWithUniqueInvite(admin, name);
++  if ("error" in inserted) {
++    return { success: false, error: inserted.error };
++  }
++  const familyId = inserted.id;
++
++  if (existing?.id) {
++    const { error: upErr } = await admin
++      .from("profiles")
++      .update({
++        name: ownerName,
++        family_id: familyId,
++        role: "owner",
++      })
++      .eq("id", user.id);
++    if (upErr) {
++      await admin.from("families").delete().eq("id", familyId);
++      return { success: false, error: upErr.message || "No se pudo actualizar el perfil." };
++    }
++  } else {
++    const { error: insErr } = await admin.from("profiles").insert({
++      id: user.id,
++      name: ownerName,
++      family_id: familyId,
++      role: "owner",
++    });
++    if (insErr) {
++      await admin.from("families").delete().eq("id", familyId);
++      return { success: false, error: insErr.message || "No se pudo crear el perfil." };
++    }
++  }
++
++  const { error: ownErr } = await admin.from("families").update({ owner_id: user.id }).eq("id", familyId);
++  if (ownErr) {
++    return { success: false, error: ownErr.message || "No se pudo asignar el propietario." };
++  }
++
++  const { error: domErr } = await admin.from("domains").insert(
++    BASE_DOMAINS.map((domain) => ({
++      family_id: familyId,
++      name: domain.name,
++      agent: domain.agent,
++      weight: domain.weight,
++      is_active: false,
++    })),
++  );
++  if (domErr) {
++    return { success: false, error: domErr.message || "No se pudieron crear los dominios base." };
++  }
++
++  return { success: true, familyId };
++}
++
++/** Usuario autenticado sin familia: se une con código de invitación (rol member). */
++export async function joinFamilyWithInviteForCurrentUserAction(
++  inviteRaw: string,
++  memberDisplayName: string,
++): Promise<Ok | Err> {
++  const code = parseInviteCodeFromInput(inviteRaw);
++  const memberName = memberDisplayName.trim();
++  if (!code) return { success: false, error: "Código de invitación no válido." };
++  if (!memberName) return { success: false, error: "Tu nombre es obligatorio." };
++
++  const supabase = await createClient();
++  const {
++    data: { user },
++  } = await supabase.auth.getUser();
++  if (!user?.id) return { success: false, error: "No hay sesión activa." };
++
++  const admin = createAdminClient();
++
++  const { data: existing, error: readErr } = await admin.from("profiles").select("id,family_id").eq("id", user.id).maybeSingle();
++  if (readErr) {
++    return { success: false, error: readErr.message || "No se pudo leer el perfil." };
++  }
++  if (existing?.family_id) {
++    return { success: false, error: "Ya perteneces a una familia." };
++  }
++
++  const { data: family, error: famErr } = await admin.from("families").select("id").eq("invite_code", code).maybeSingle();
++  if (famErr || !family?.id) {
++    return { success: false, error: "No encontramos una familia con ese código." };
++  }
++
++  if (existing?.id) {
++    const { error: upErr } = await admin
++      .from("profiles")
++      .update({
++        name: memberName,
++        family_id: family.id,
++        role: "member",
++      })
++      .eq("id", user.id);
++    if (upErr) {
++      return { success: false, error: upErr.message || "No se pudo unir a la familia." };
++    }
++  } else {
++    const { error: insErr } = await admin.from("profiles").insert({
++      id: user.id,
++      name: memberName,
++      family_id: family.id,
++      role: "member",
++    });
++    if (insErr) {
++      return { success: false, error: insErr.message || "No se pudo crear el perfil." };
++    }
++  }
++
++  return { success: true, familyId: family.id };
++}
+
+diff --git a/src/app/onboarding/OnboardingFamilyGate.tsx b/src/app/onboarding/OnboardingFamilyGate.tsx
+new file mode 100644
+index 0000000..4ab3307
+--- /dev/null
++++ b/src/app/onboarding/OnboardingFamilyGate.tsx
+@@ -0,0 +1,144 @@
++"use client";
++
++import type { CSSProperties } from "react";
++import { FormEvent, useEffect, useState } from "react";
++import { useRouter, useSearchParams } from "next/navigation";
++import { createFamilyForCurrentUserAction, joinFamilyWithInviteForCurrentUserAction } from "@/lib/actions/family-setup";
++
++export function OnboardingFamilyGate() {
++  const router = useRouter();
++  const searchParams = useSearchParams();
++  const inviteFromUrl = searchParams.get("invite");
++  const [familyName, setFamilyName] = useState("");
++  const [ownerName, setOwnerName] = useState("");
++  const [inviteCode, setInviteCode] = useState("");
++  const [memberName, setMemberName] = useState("");
++  const [submitting, setSubmitting] = useState<"create" | "join" | null>(null);
++  const [error, setError] = useState("");
++
++  useEffect(() => {
++    if (inviteFromUrl) {
++      setInviteCode(inviteFromUrl);
++    }
++  }, [inviteFromUrl]);
++
++  const onCreate = async (e: FormEvent) => {
++    e.preventDefault();
++    if (submitting) return;
++    setSubmitting("create");
++    setError("");
++    const res = await createFamilyForCurrentUserAction(familyName, ownerName);
++    setSubmitting(null);
++    if (!res.success) {
++      setError(res.error);
++      return;
++    }
++    router.refresh();
++  };
++
++  const onJoin = async (e: FormEvent) => {
++    e.preventDefault();
++    if (submitting) return;
++    setSubmitting("join");
++    setError("");
++    const res = await joinFamilyWithInviteForCurrentUserAction(inviteCode, memberName);
++    setSubmitting(null);
++    if (!res.success) {
++      setError(res.error);
++      return;
++    }
++    router.refresh();
++  };
++
++  return (
++    <section
++      style={{
++        width: "min(760px, 100%)",
++        border: "1px solid rgba(255,255,255,0.1)",
++        borderRadius: 16,
++        background: "rgba(22,26,34,0.92)",
++        padding: 16,
++        boxShadow: "0 16px 36px rgba(0,0,0,0.35)",
++        display: "flex",
++        flexDirection: "column",
++        gap: 16,
++      }}
++    >
++      <div>
++        <p style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Antes de configurar Kore</p>
++        <p style={{ margin: "8px 0 0", fontSize: 14, color: "rgba(228,230,237,0.78)", lineHeight: 1.45 }}>
++          Crea un hogar nuevo o únete con el código que te han pasado por WhatsApp (formato{" "}
++          <span style={{ fontWeight: 700 }}>KORE-XXXX</span>).
++        </p>
++      </div>
++
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
++        <form onSubmit={onCreate} style={{ display: "flex", flexDirection: "column", gap: 8, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 12 }}>
++          <p style={{ margin: 0, fontWeight: 700, fontSize: 15 }}>Crear familia nueva</p>
++          <input
++            value={familyName}
++            onChange={(e) => setFamilyName(e.target.value)}
++            placeholder="Nombre del hogar"
++            required
++            style={inputStyle}
++          />
++          <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="Tu nombre" required style={inputStyle} />
++          <button type="submit" disabled={submitting !== null} style={btnPrimary}>
++            {submitting === "create" ? "Creando…" : "Crear hogar"}
++          </button>
++        </form>
++
++        <form onSubmit={onJoin} style={{ display: "flex", flexDirection: "column", gap: 8, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 12 }}>
++          <p style={{ margin: 0, fontWeight: 700, fontSize: 15 }}>Unirse con código</p>
++          <input
++            value={inviteCode}
++            onChange={(e) => setInviteCode(e.target.value)}
++            placeholder="KORE-A3X9"
++            required
++            style={inputStyle}
++            autoCapitalize="characters"
++          />
++          <input value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Tu nombre" required style={inputStyle} />
++          <button type="submit" disabled={submitting !== null} style={btnSecondary}>
++            {submitting === "join" ? "Uniendo…" : "Unirme"}
++          </button>
++        </form>
++      </div>
++
++      {error ? (
++        <p style={{ margin: 0, color: "#fca5a5", fontSize: 13 }}>{error}</p>
++      ) : null}
++    </section>
++  );
++}
++
++const inputStyle: CSSProperties = {
++  minHeight: 44,
++  borderRadius: 10,
++  border: "1px solid rgba(255,255,255,0.18)",
++  background: "#121622",
++  color: "#e4e6ed",
++  padding: "10px 12px",
++  fontSize: 16,
++  outline: "none",
++};
++
++const btnPrimary: CSSProperties = {
++  minHeight: 44,
++  border: "none",
++  borderRadius: 10,
++  background: "#4CC9A0",
++  color: "#0a1a14",
++  fontWeight: 700,
++  cursor: "pointer",
++};
++
++const btnSecondary: CSSProperties = {
++  minHeight: 44,
++  border: "1px solid rgba(255,255,255,0.2)",
++  borderRadius: 10,
++  background: "rgba(255,255,255,0.06)",
++  color: "#e4e6ed",
++  fontWeight: 700,
++  cursor: "pointer",
++};
+
+diff --git a/src/__tests__/invite-code.test.ts b/src/__tests__/invite-code.test.ts
+new file mode 100644
+index 0000000..7e25eec
+--- /dev/null
++++ b/src/__tests__/invite-code.test.ts
+@@ -0,0 +1,30 @@
++import { describe, expect, it } from "vitest";
++
++import { generateInviteCode, normalizeInviteCode, parseInviteCodeFromInput } from "@/lib/invite-code";
++
++describe("generateInviteCode", () => {
++  it("usa prefijo KORE- y 4 caracteres del alfabeto acordado", () => {
++    const code = generateInviteCode();
++    expect(code).toMatch(/^KORE-[A-Z2-9]{4}$/);
++  });
++});
++
++describe("parseInviteCodeFromInput", () => {
++  it("normaliza variantes con guion y mayúsculas", () => {
++    expect(parseInviteCodeFromInput("kore-a3x9")).toBe("KORE-A3X9");
++    expect(parseInviteCodeFromInput("KORE-A3X9")).toBe("KORE-A3X9");
++    expect(parseInviteCodeFromInput("a3x9")).toBe("KORE-A3X9");
++  });
++
++  it("devuelve null si el formato no cuadra", () => {
++    expect(parseInviteCodeFromInput("")).toBeNull();
++    expect(parseInviteCodeFromInput("KORE-ABC")).toBeNull();
++    expect(parseInviteCodeFromInput("KORE-ABCDE")).toBeNull();
++  });
++});
++
++describe("normalizeInviteCode", () => {
++  it("quita prefijo y separadores", () => {
++    expect(normalizeInviteCode("KORE-A3X9")).toBe("A3X9");
++  });
++});
+
+diff --git a/src/__tests__/register-family.test.ts b/src/__tests__/register-family.test.ts
+new file mode 100644
+index 0000000..621e5c7
+--- /dev/null
++++ b/src/__tests__/register-family.test.ts
+@@ -0,0 +1,117 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++const mockCreateAdminClient = vi.fn();
++
++vi.mock("@/lib/supabase/admin", () => ({
++  createAdminClient: mockCreateAdminClient,
++}));
++
++describe("registerFamilyAction", () => {
++  beforeEach(() => {
++    vi.resetModules();
++    vi.clearAllMocks();
++  });
++
++  it("con código de invitación enlaza al hogar existente sin insertar dominios", async () => {
++    const insertProfiles = vi.fn().mockResolvedValue({ error: null });
++    const selectFamilies = vi.fn(() => ({
++      eq: vi.fn(() => ({
++        maybeSingle: vi.fn(async () => ({ data: { id: "fam-invite" }, error: null })),
++      })),
++    }));
++
++    mockCreateAdminClient.mockReturnValue({
++      auth: {
++        admin: {
++          createUser: vi.fn(async () => ({
++            data: { user: { id: "user-join-1" } },
++            error: null,
++          })),
++          deleteUser: vi.fn(async () => ({ error: null })),
++        },
++      },
++      from: vi.fn((table: string) => {
++        if (table === "families") {
++          return { select: selectFamilies };
++        }
++        if (table === "profiles") {
++          return { insert: insertProfiles };
++        }
++        if (table === "domains") {
++          return {
++            insert: vi.fn(() => {
++              throw new Error("no se deben crear dominios en alta por invitación");
++            }),
++          };
++        }
++        return {};
++      }),
++    });
++
++    const { registerFamilyAction } = await import("@/lib/actions/register");
++    const res = await registerFamilyAction("join@test.dev", "password123", "—", "Ana", {
++      inviteCode: "KORE-A3X9",
++    });
++
++    expect(res).toEqual({ success: true });
++    expect(insertProfiles).toHaveBeenCalledWith(
++      expect.objectContaining({
++        id: "user-join-1",
++        family_id: "fam-invite",
++        role: "member",
++      }),
++    );
++  });
++
++  it("sin invitación crea familia, perfil owner y dominios base", async () => {
++    const insertDomains = vi.fn().mockResolvedValue({ error: null });
++    const insertProfiles = vi.fn().mockResolvedValue({ error: null });
++    const updateFamilies = vi.fn(() => ({
++      eq: vi.fn().mockResolvedValue({ error: null }),
++    }));
++
++    mockCreateAdminClient.mockReturnValue({
++      auth: {
++        admin: {
++          createUser: vi.fn(async () => ({
++            data: { user: { id: "user-new-1" } },
++            error: null,
++          })),
++          deleteUser: vi.fn(async () => ({ error: null })),
++        },
++      },
++      from: vi.fn((table: string) => {
++        if (table === "families") {
++          return {
++            insert: vi.fn(() => ({
++              select: () => ({
++                single: vi.fn(async () => ({ data: { id: "fam-new" }, error: null })),
++              }),
++            })),
++            update: updateFamilies,
++          };
++        }
++        if (table === "profiles") {
++          return { insert: insertProfiles };
++        }
++        if (table === "domains") {
++          return { insert: insertDomains };
++        }
++        return {};
++      }),
++    });
++
++    const { registerFamilyAction } = await import("@/lib/actions/register");
++    const res = await registerFamilyAction("new@test.dev", "password123", "Mi hogar", "Luis");
++
++    expect(res).toEqual({ success: true });
++    expect(insertProfiles).toHaveBeenCalledWith(
++      expect.objectContaining({
++        id: "user-new-1",
++        family_id: "fam-new",
++        role: "owner",
++      }),
++    );
++    expect(insertDomains).toHaveBeenCalled();
++  });
++});

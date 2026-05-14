@@ -27,12 +27,16 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isAuthPage = pathname === "/login" || pathname === "/register";
+  const isOnboarding = pathname === "/onboarding";
 
-  if (!session && !isAuthPage) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/login";
-    redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+  if (!session) {
+    if (!isAuthPage) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/login";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+    return response;
   }
 
   if (session && isAuthPage) {
@@ -40,6 +44,39 @@ export async function proxy(request: NextRequest) {
     redirectUrl.pathname = "/";
     redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("family_id")
+    .eq("id", session.user.id)
+    .maybeSingle();
+
+  const familyId = profile?.family_id ?? null;
+
+  if (!familyId) {
+    if (!isOnboarding) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/onboarding";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+    return response;
+  }
+
+  if (isOnboarding) {
+    const { data: family } = await supabase
+      .from("families")
+      .select("onboarding_step")
+      .eq("id", familyId)
+      .maybeSingle();
+    const step = family?.onboarding_step ?? null;
+    if (step && step !== "pending") {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return response;

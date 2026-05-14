@@ -2,21 +2,20 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { BASE_DOMAINS } from "@/lib/domains-catalog";
-
-function generateInviteCode(): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const part = (len: number) =>
-    Array.from({ length: len }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-  return `KORE-${part(4)}-${part(2)}`;
-}
+import { insertFamilyWithUniqueInvite, parseInviteCodeFromInput } from "@/lib/invite-code";
 
 type RegisterFamilyResult = { success: true } | { error: string };
+
+type RegisterFamilyOptions = {
+  inviteCode?: string | null;
+};
 
 export async function registerFamilyAction(
   email: string,
   password: string,
   familyName: string,
   ownerName: string,
+  options?: RegisterFamilyOptions,
 ): Promise<RegisterFamilyResult> {
   const admin = createAdminClient();
   let createdUserId: string | null = null;
@@ -38,24 +37,32 @@ export async function registerFamilyAction(
 
     createdUserId = createdUserData.user.id;
 
-    const { data: family, error: familyError } = await admin
-      .from("families")
-      .insert({
-        name: normalizedFamilyName,
-        invite_code: generateInviteCode(),
-        onboarding_step: "pending",
-      })
-      .select("id")
-      .single();
-    console.log("[registerFamilyAction] INSERT families", {
-      familyName: normalizedFamilyName,
-      familyId: family?.id ?? null,
-      error: familyError?.message ?? null,
-    });
+    const invite = parseInviteCodeFromInput(options?.inviteCode ?? "");
 
-    if (familyError || !family?.id) {
-      throw new Error(familyError?.message || "No se pudo crear la familia.");
+    if (invite) {
+      const { data: familyRow, error: famLookupErr } = await admin.from("families").select("id").eq("invite_code", invite).maybeSingle();
+      if (famLookupErr || !familyRow?.id) {
+        throw new Error("El código de invitación no es válido.");
+      }
+
+      const { error: profileError } = await admin.from("profiles").insert({
+        id: createdUserId,
+        name: normalizedOwnerName,
+        family_id: familyRow.id,
+        role: "member",
+      });
+      if (profileError) {
+        throw new Error(profileError.message || "No se pudo crear el perfil.");
+      }
+
+      return { success: true };
     }
+
+    const inserted = await insertFamilyWithUniqueInvite(admin, normalizedFamilyName);
+    if ("error" in inserted) {
+      throw new Error(inserted.error);
+    }
+    const family = { id: inserted.id };
 
     const { error: profileError } = await admin.from("profiles").insert({
       id: createdUserId,
@@ -63,22 +70,11 @@ export async function registerFamilyAction(
       family_id: family.id,
       role: "owner",
     });
-    console.log("[registerFamilyAction] INSERT profiles owner", {
-      ownerId: createdUserId,
-      ownerName: normalizedOwnerName,
-      familyId: family.id,
-      error: profileError?.message ?? null,
-    });
-
     if (profileError) {
       throw new Error(profileError.message || "No se pudo crear el perfil owner.");
     }
 
-    const { error: familyOwnerError } = await admin
-      .from("families")
-      .update({ owner_id: createdUserId })
-      .eq("id", family.id);
-
+    const { error: familyOwnerError } = await admin.from("families").update({ owner_id: createdUserId }).eq("id", family.id);
     if (familyOwnerError) {
       throw new Error(familyOwnerError.message || "No se pudo asignar owner a la familia.");
     }
@@ -92,22 +88,6 @@ export async function registerFamilyAction(
         is_active: false,
       })),
     );
-    console.log("[registerFamilyAction] INSERT domains base", {
-      familyId: family.id,
-      domainsCount: BASE_DOMAINS.length,
-      error: domainsError?.message ?? null,
-    });
-
-    // Pareja e hijos no se crean en el registro: se crean durante onboarding.
-    console.log("[registerFamilyAction] INSERT profiles pareja", {
-      skipped: true,
-      reason: "se crean en onboarding",
-    });
-    console.log("[registerFamilyAction] INSERT profiles hijos", {
-      skipped: true,
-      reason: "se crean en onboarding",
-    });
-
     if (domainsError) {
       throw new Error(domainsError.message || "No se pudieron crear los dominios base.");
     }
