@@ -55,7 +55,7 @@ import { getWeeklyMenu } from "@/lib/actions/menu";
 import { getSleepLogs } from "@/lib/actions/sleep";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
-import { getFamilyContext, resolvePartnerProfile } from "@/lib/family-utils";
+import { getFamilyContext, resolvePartnerProfile, shouldShowPartnerInviteWidget } from "@/lib/family-utils";
 import { BASE_DOMAINS } from "@/lib/domains-catalog";
 
 function avatarStressBorder(level: number): string {
@@ -219,6 +219,8 @@ type CorchoMessage = {
 type HomeClientProps = {
   currentUserId: string;
   familyName: string;
+  initialInviteCode?: string | null;
+  partnerHasAuthAccount?: boolean;
   initialProfiles: Profile[];
   initialDomains: KoreDomainRow[];
   initialCalendarEvents: CalendarEventRow[];
@@ -411,6 +413,8 @@ function withinAgendaWindow(dateIso: string, now = new Date()): boolean {
 export function HomeClient({
   currentUserId,
   familyName,
+  initialInviteCode = null,
+  partnerHasAuthAccount = false,
   initialProfiles = [],
   initialDomains = [],
   initialCalendarEvents = [],
@@ -425,6 +429,7 @@ export function HomeClient({
   const safeInitialProfiles = useMemo(() => initialProfiles ?? [], [initialProfiles]);
   const [line1, line2] = familyName.split(/[-\/\s]/, 2);
   const [showAgent, setShowAgent] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
   const [showCorcho, setShowCorcho] = useState(false);
   const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
   const [showEconomia, setShowEconomia] = useState(false);
@@ -495,6 +500,28 @@ export function HomeClient({
     () => getFamilyContext(safeInitialProfiles, currentUserId),
     [safeInitialProfiles, currentUserId],
   );
+
+  const showPartnerInviteWidget = useMemo(
+    () =>
+      shouldShowPartnerInviteWidget(
+        initialInviteCode,
+        familyContext.currentUser,
+        partnerHasAuthAccount,
+      ),
+    [initialInviteCode, familyContext.currentUser, partnerHasAuthAccount],
+  );
+
+  const handleCopyInviteCode = useCallback(async () => {
+    const code = (initialInviteCode ?? "").trim();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setInviteCopied(true);
+      window.setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  }, [initialInviteCode]);
 
   const corchoPartner = useMemo(
     () => resolvePartnerProfile(familyContext.adults, currentUserId),
@@ -1084,6 +1111,94 @@ export function HomeClient({
           boxSizing: "border-box",
         }}
       >
+        {showPartnerInviteWidget ? (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              maxHeight: 40,
+              margin: "0 16px 6px",
+              padding: "4px 4px 6px",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "nowrap",
+              boxSizing: "border-box",
+              overflow: "hidden",
+              background: "transparent",
+              borderBottom: "0.5px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                lineHeight: 1.2,
+                color: C.muted,
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Invita a tu pareja:
+            </span>
+            <code
+              style={{
+                fontSize: 12,
+                lineHeight: 1.2,
+                fontWeight: 600,
+                letterSpacing: "0.05em",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                color: C.green,
+                minWidth: 0,
+                flex: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {(initialInviteCode ?? "").trim()}
+            </code>
+            <button
+              type="button"
+              onClick={() => void handleCopyInviteCode()}
+              title={inviteCopied ? "Copiado" : "Copiar código"}
+              aria-label={inviteCopied ? "Código copiado" : "Copiar código de invitación"}
+              style={{
+                flexShrink: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: 28,
+                minWidth: 28,
+                padding: "0 6px",
+                borderRadius: 6,
+                border: "0.5px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.04)",
+                color: inviteCopied ? C.green : "rgba(228,230,237,0.75)",
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                cursor: "pointer",
+                lineHeight: 1,
+              }}
+            >
+              {inviteCopied ? (
+                "✓"
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M8 5.5V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-2M8 5.5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2M8 5.5h8a2 2 0 0 1 2 2v2"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
+        ) : null}
+
         {/* Agenda */}
         <section>
           <p style={{ ...sectionLabel }}>Agenda familiar</p>

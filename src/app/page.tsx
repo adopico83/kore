@@ -15,12 +15,31 @@ import {
   getPendingCleaningTasks,
   getWeeklyMenu,
   getSleepLogs,
+  type Profile,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+/** True si algún adulto distinto del owner tiene `profiles.id` presente en `auth.users`. */
+async function computePartnerHasAuthAccount(profiles: Profile[]): Promise<boolean> {
+  const ownerId = profiles.find((p) => p.role === "owner")?.id?.trim() ?? "";
+  if (!ownerId) return false;
+
+  const otherAdults = profiles.filter((p) => p.role !== "child" && p.id !== ownerId);
+  if (otherAdults.length === 0) return false;
+
+  const admin = createAdminClient();
+  for (const p of otherAdults) {
+    const { data, error } = await admin.auth.admin.getUserById(p.id);
+    if (!error && data?.user) return true;
+  }
+  return false;
+}
 
 export default async function Home() {
   console.log("PAGE.TSX EJECUTÁNDOSE");
   const supabase = await createClient();
   let familyName = "";
+  let initialInviteCode: string | null = null;
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -36,10 +55,12 @@ export default async function Home() {
     if (profile?.family_id) {
       const { data: family } = await supabase
         .from("families")
-        .select("onboarding_step, name")
+        .select("onboarding_step, name, invite_code")
         .eq("id", profile.family_id)
         .single();
       familyName = family?.name ?? "";
+      const rawInvite = family?.invite_code;
+      initialInviteCode = typeof rawInvite === "string" && rawInvite.trim() ? rawInvite.trim() : null;
 
       console.log("USER:", user?.id);
       console.log("PROFILE:", profile);
@@ -60,6 +81,8 @@ export default async function Home() {
       <HomeClient
         currentUserId={user?.id ?? ""}
         familyName={familyName}
+        initialInviteCode={initialInviteCode}
+        partnerHasAuthAccount={false}
         initialProfiles={[]}
         initialDomains={[]}
         initialCalendarEvents={[]}
@@ -101,10 +124,19 @@ export default async function Home() {
   const initialDomains = initialDomainsAll.filter((domain) => domain.is_active === true);
   const initialKoreNotes = allKoreNotes.slice(0, 3);
 
+  let partnerHasAuthAccount = false;
+  try {
+    partnerHasAuthAccount = await computePartnerHasAuthAccount(initialProfiles);
+  } catch {
+    partnerHasAuthAccount = false;
+  }
+
   return (
     <HomeClient
       currentUserId={user?.id ?? ""}
       familyName={familyName}
+      initialInviteCode={initialInviteCode}
+      partnerHasAuthAccount={partnerHasAuthAccount}
       initialProfiles={initialProfiles}
       initialDomains={initialDomains}
       initialCalendarEvents={initialCalendarEvents}

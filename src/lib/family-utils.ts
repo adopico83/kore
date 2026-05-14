@@ -45,6 +45,22 @@ export function resolvePartnerProfile(adults: Profile[], currentUserId: string):
 }
 
 /**
+ * Home: tarjeta de código de invitación solo para owner y mientras ningún otro adulto
+ * tenga cuenta en `auth.users` (el placeholder del onboarding no cuenta).
+ */
+export function shouldShowPartnerInviteWidget(
+  inviteCode: string | null | undefined,
+  currentUser: Profile | null,
+  partnerHasAuthAccount: boolean,
+): boolean {
+  const code = (inviteCode ?? "").trim();
+  if (!code) return false;
+  if (!currentUser || currentUser.role !== "owner") return false;
+  if (partnerHasAuthAccount) return false;
+  return true;
+}
+
+/**
  * Resuelve un nombre mostrado a `profiles.id`.
  * - Coincidencia de nombre case-insensitive (tras quitar acentos).
  * - Sinónimos de “peque” / hijo → primer perfil con `role === "child"`.
