@@ -2025,6 +2025,7 @@ export function HomeClient({
       ) : null}
       {showSaludResumen ? (
         <SaludResumenModal
+          profiles={safeInitialProfiles}
           onClose={() => setShowSaludResumen(false)}
           onChange={() => void loadSalud()}
         />

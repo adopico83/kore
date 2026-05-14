@@ -1,5 +1,6 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
+import type { AgentExecutionContext } from "./agent-execution-context";
 import {
   addSchoolEvent,
   addSchoolMaterial,
@@ -86,7 +87,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Colegio." };
   }
@@ -98,7 +99,7 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       const date = String(a.date ?? "").trim();
       const type = String(a.type ?? "otro");
       if (!title || !date) throw new Error("Faltan title o date en evento escolar.");
-      const ev = await addSchoolEvent(familyId, {
+      const ev = await addSchoolEvent(ctx.familyId, {
         title,
         date,
         time: a.time ? String(a.time) : undefined,
@@ -108,25 +109,25 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       return { ok: true, event: ev };
     }
     case "get_school_events": {
-      const events = await getSchoolEvents(familyId);
+      const events = await getSchoolEvents(ctx.familyId);
       return { ok: true, events };
     }
     case "add_school_material": {
       const item = String(a.item ?? "").trim();
       const urgency = String(a.urgency ?? "media");
       if (!item) throw new Error("Falta item en material escolar.");
-      const material = await addSchoolMaterial(familyId, { item, urgency });
+      const material = await addSchoolMaterial(ctx.familyId, { item, urgency });
       return { ok: true, material };
     }
     case "get_school_materials": {
-      const materials = await getSchoolMaterials(familyId);
+      const materials = await getSchoolMaterials(ctx.familyId);
       return { ok: true, materials };
     }
     case "delete_school_item": {
       const id = String(a.id ?? "").trim();
       const item_type = a.item_type as "event" | "material";
       if (!id || !item_type) throw new Error("Faltan id o item_type para borrar elemento escolar.");
-      await deleteSchoolItem(familyId, id, item_type);
+      await deleteSchoolItem(ctx.familyId, id, item_type);
       return { ok: true, updated: id, item_type };
     }
     default:

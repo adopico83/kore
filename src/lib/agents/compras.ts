@@ -1,5 +1,7 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
+import type { AgentExecutionContext } from "./agent-execution-context";
+import { sortedAdultsOwnerFirst } from "@/lib/family-utils";
 import {
   addShoppingItem,
   clearCompletedItems,
@@ -79,7 +81,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Compras." };
   }
@@ -94,6 +96,8 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       const actorId =
         (typeof a.created_by === "string" && a.created_by.trim()) ||
         (typeof a.actorId === "string" && a.actorId.trim()) ||
+        ctx.currentUserId?.trim() ||
+        sortedAdultsOwnerFirst(ctx.profiles)[0]?.id ||
         (Array.isArray(a.initialProfiles)
           ? String(
               (
@@ -104,7 +108,7 @@ export async function execute(toolName: string, args: unknown, familyId: string)
             ).trim()
           : "") ||
         "";
-      const item = await addShoppingItem(familyId, {
+      const item = await addShoppingItem(ctx.familyId, {
         name,
         quantity: a.quantity != null ? String(a.quantity) : undefined,
         category,
@@ -114,23 +118,23 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       return { ok: true, item };
     }
     case "get_shopping_list": {
-      const items = await getShoppingItems(familyId);
+      const items = await getShoppingItems(ctx.familyId);
       return { ok: true, items };
     }
     case "complete_shopping_item": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para completar item de compras.");
-      await completeShoppingItem(familyId, id);
+      await completeShoppingItem(ctx.familyId, id);
       return { ok: true, completed: id };
     }
     case "delete_shopping_item": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para eliminar item de compras.");
-      await deleteShoppingItem(familyId, id);
+      await deleteShoppingItem(ctx.familyId, id);
       return { ok: true, deleted: id };
     }
     case "clear_completed_items": {
-      await clearCompletedItems(familyId);
+      await clearCompletedItems(ctx.familyId);
       return { ok: true };
     }
     default:

@@ -1,5 +1,6 @@
 import type { AgentMemoryRow } from "@/lib/kore-db";
 
+import type { AgentExecutionContext } from "./agent-execution-context";
 import * as agenda from "./agenda";
 import * as colegio from "./colegio";
 import * as compras from "./compras";
@@ -38,13 +39,15 @@ for (const agent of subagents) {
 /** Todas las herramientas OpenAI de los 11 subagentes. */
 export const allTools = subagents.flatMap((s) => s.tools);
 
-export async function executeTool(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+export async function executeTool(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   const agent = toolToAgent.get(toolName);
   if (!agent) {
     return { error: `No hay ningún subagente que ejecute la herramienta "${toolName}".` };
   }
-  return agent.execute(toolName, args, familyId);
+  return agent.execute(toolName, args, ctx);
 }
+
+export type { AgentExecutionContext } from "./agent-execution-context";
 
 /** Prompt de sistema del ORC con memorias insertadas. */
 export function buildSystemPrompt(memories: AgentMemoryRow[]): string {

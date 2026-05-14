@@ -1,5 +1,6 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
+import type { AgentExecutionContext } from "./agent-execution-context";
 import { getAgentMemory, upsertAgentMemory } from "@/lib/kore-db";
 
 export const AGENT_DESCRIPTION =
@@ -69,7 +70,7 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Memoria." };
   }
@@ -81,11 +82,11 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       const value = String(a.value ?? "").trim();
       const category = String(a.category ?? "sugerencia");
       if (!key || !value) return { error: "Faltan key o value." };
-      await upsertAgentMemory(familyId, key, value, category);
+      await upsertAgentMemory(ctx.familyId, key, value, category);
       return { ok: true, key, category };
     }
     case "get_patterns": {
-      const rows = await getAgentMemory(familyId);
+      const rows = await getAgentMemory(ctx.familyId);
       const cat = a.category ? String(a.category) : null;
       const filtered = cat ? rows.filter((r) => r.category === cat) : rows;
       return { ok: true, patterns: filtered };
@@ -96,18 +97,18 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       if (!insight) return { error: "Falta insight." };
       const key = `${INSIGHT_PREFIX}${Date.now()}`;
       const value = JSON.stringify({ insight, context, at: new Date().toISOString() });
-      await upsertAgentMemory(familyId, key, value, "sugerencia");
+      await upsertAgentMemory(ctx.familyId, key, value, "sugerencia");
       return { ok: true, key };
     }
     case "get_relevant_memories": {
-      const ctx = String(a.context ?? "").trim().toLowerCase();
-      if (!ctx) return { error: "Falta context." };
-      const rows = await getAgentMemory(familyId);
+      const contextNeedle = String(a.context ?? "").trim().toLowerCase();
+      if (!contextNeedle) return { error: "Falta context." };
+      const rows = await getAgentMemory(ctx.familyId);
       const relevant = rows.filter(
         (r) =>
-          r.key.toLowerCase().includes(ctx) ||
-          r.value.toLowerCase().includes(ctx) ||
-          r.category.toLowerCase().includes(ctx),
+          r.key.toLowerCase().includes(contextNeedle) ||
+          r.value.toLowerCase().includes(contextNeedle) ||
+          r.category.toLowerCase().includes(contextNeedle),
       );
       return { ok: true, memories: relevant.slice(0, 40) };
     }

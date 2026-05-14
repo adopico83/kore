@@ -1,5 +1,7 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
+import type { AgentExecutionContext } from "./agent-execution-context";
+import { resolveProfileIdFromAgentToken } from "@/lib/family-utils";
 import {
   addHealthRecord,
   deleteHealthRecord,
@@ -9,13 +11,11 @@ import {
 import {
   buildCitaHealthInsert,
   buildMedHealthInsert,
-  memberForPatientId,
-  patientIdForMember,
-  type SaludMember,
+  resolveHealthBucketPatientId,
 } from "@/lib/kore-salud-sync";
 
 export const AGENT_DESCRIPTION =
-  "Experto en salud familiar. Gestiona ÚNICAMENTE citas médicas, medicaciones, dosis, tratamientos y seguimiento de salud de Peque, Ander y Leire.";
+  "Experto en salud familiar. Gestiona ÚNICAMENTE citas médicas, medicaciones, dosis, tratamientos y seguimiento de salud de los miembros del hogar.";
 
 const NAMES = new Set([
   "add_appointment",
@@ -25,11 +25,6 @@ const NAMES = new Set([
   "complete_appointment",
   "delete_health_record",
 ]);
-
-function asMember(p: string): SaludMember | null {
-  if (p === "Peque" || p === "Ander" || p === "Leire") return p;
-  return null;
-}
 
 function normalizeTime(raw: string): string {
   const s = (raw ?? "").trim();
@@ -50,9 +45,7 @@ function normalizeDate(rawDate: string): string | null {
   if (input === "mañana" || input === "manana") {
     const tomorrow = new Date(now);
     tomorrow.setDate(now.getDate() + 1);
-    const normalized = toIso(tomorrow);
-    console.log("[salud] normalizeDate", { rawDate, normalized, mode: "relative_tomorrow" });
-    return normalized;
+    return toIso(tomorrow);
   }
 
   if (input === "esta semana") {
@@ -60,13 +53,10 @@ function normalizeDate(rawDate: string): string | null {
     const day = monday.getDay();
     const mondayOffset = day === 0 ? -6 : 1 - day;
     monday.setDate(monday.getDate() + mondayOffset);
-    const normalized = toIso(monday);
-    console.log("[salud] normalizeDate", { rawDate, normalized, mode: "relative_week_monday" });
-    return normalized;
+    return toIso(monday);
   }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-    console.log("[salud] normalizeDate", { rawDate, normalized: input, mode: "iso" });
     return input;
   }
 
@@ -77,9 +67,7 @@ function normalizeDate(rawDate: string): string | null {
     let year = Number(slashOrDash[3]);
     if (year < 100) year += 2000;
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      const normalized = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      console.log("[salud] normalizeDate", { rawDate, normalized, mode: "slash_or_dash" });
-      return normalized;
+      return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
   }
 
@@ -108,13 +96,10 @@ function normalizeDate(rawDate: string): string | null {
     const month = months[monthName];
     const year = textDate[3] ? Number(textDate[3]) : 2026;
     if (month && day >= 1 && day <= 31) {
-      const normalized = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      console.log("[salud] normalizeDate", { rawDate, normalized, mode: "text_month" });
-      return normalized;
+      return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
   }
 
-  console.log("[salud] normalizeDate", { rawDate, normalized: null, mode: "failed" });
   return null;
 }
 
@@ -210,49 +195,44 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+function resolvePatientId(raw: string, profiles: AgentExecutionContext["profiles"]): string | null {
+  return resolveProfileIdFromAgentToken(String(raw ?? "").trim(), profiles);
+}
+
+export async function execute(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Salud." };
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const { familyId, profiles } = ctx;
 
   switch (toolName) {
     case "add_appointment": {
-      const patient = asMember(String(a.patient ?? ""));
+      const patientId = resolvePatientId(String(a.patient ?? ""), profiles);
       const descripcion = String(a.description ?? "").trim();
       const rawDate = String(a.date ?? "").trim();
       const fecha = normalizeDate(rawDate);
       const rawTime = String(a.time ?? "").trim();
       const hora = normalizeTime(rawTime);
       const lugar = String(a.location ?? "").trim();
-      if (!patient || !descripcion || !fecha || !hora) return { error: "Faltan campos." };
-      console.log("[salud] add_appointment input", {
-        rawArgs: a,
-        patient,
-        descripcion,
-        rawDate,
-        normalizedDate: fecha,
-        rawTime,
-        normalizedTime: hora,
-      });
-      const insert = buildCitaHealthInsert(patient, {
+      if (!patientId || !descripcion || !fecha || !hora) return { error: "Faltan campos o paciente no reconocido." };
+      const insert = buildCitaHealthInsert(patientId, {
         descripcion,
         fecha,
         hora,
         lugar,
       });
       const row = await addHealthRecord(familyId, insert);
-      console.log("[salud] add_appointment output", row);
       return { ok: true, record: row };
     }
     case "add_medication": {
-      const patient = asMember(String(a.patient ?? ""));
+      const patientId = resolvePatientId(String(a.patient ?? ""), profiles);
       const nombre = String(a.name ?? "").trim();
       const dosis = String(a.dose ?? "").trim();
       const frec = Number(a.frequency_hours);
       const nextDose = a.next_dose ? String(a.next_dose) : "";
-      if (!patient || !nombre || !dosis || Number.isNaN(frec)) return { error: "Faltan campos." };
-      const insert = buildMedHealthInsert(patient, {
+      if (!patientId || !nombre || !dosis || Number.isNaN(frec)) return { error: "Faltan campos o paciente no reconocido." };
+      const insert = buildMedHealthInsert(patientId, {
         nombre,
         dosis,
         frecuenciaHoras: frec,
@@ -262,17 +242,20 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       return { ok: true, record: row };
     }
     case "log_medication_given": {
-      const patient = asMember(String(a.patient ?? ""));
+      const patientId = resolvePatientId(String(a.patient ?? ""), profiles);
       const medName = String(a.medication ?? "").trim().toLowerCase();
       const timeNote = String(a.time ?? "").trim();
-      if (!patient || !medName) return { error: "Faltan campos." };
+      if (!patientId || !medName) return { error: "Faltan campos o paciente no reconocido." };
       const rows = await getHealthRecords(familyId);
       const cand = rows.filter((r) => {
         if (r.type !== "medication") return false;
-        const m = memberForPatientId(r.patient_id);
-        if (m !== patient) return false;
+        const bucket = resolveHealthBucketPatientId(r, profiles);
+        if (bucket !== patientId) return false;
         try {
-          const p = JSON.parse(r.description) as { nombre?: string };
+          const p = JSON.parse(r.description) as { nombre?: string; kind?: string };
+          if (p?.kind === "med" && typeof p.nombre === "string") {
+            return p.nombre.toLowerCase().includes(medName);
+          }
           return (p.nombre ?? r.description).toLowerCase().includes(medName);
         } catch {
           return r.description.toLowerCase().includes(medName);
@@ -288,10 +271,12 @@ export async function execute(toolName: string, args: unknown, familyId: string)
     }
     case "get_health_records": {
       const rows = await getHealthRecords(familyId);
-      const patient = a.patient ? asMember(String(a.patient)) : null;
-      if (patient) {
-        const pid = patientIdForMember(patient);
-        return { ok: true, records: rows.filter((r) => r.patient_id === pid) };
+      const filterId = a.patient ? resolvePatientId(String(a.patient), profiles) : null;
+      if (filterId) {
+        return {
+          ok: true,
+          records: rows.filter((r) => resolveHealthBucketPatientId(r, profiles) === filterId),
+        };
       }
       return { ok: true, records: rows };
     }

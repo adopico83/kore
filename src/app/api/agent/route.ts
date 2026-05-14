@@ -3,7 +3,8 @@ import OpenAI from "openai";
 
 import { applyGuardrails, type PlannedTool } from "@/lib/agent/guardrails";
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
-import { getScopedFamilyId } from "@/lib/family-context";
+import type { AgentExecutionContext } from "@/lib/agents/agent-execution-context";
+import { getScopedFamilyId, getScopedUserId } from "@/lib/family-context";
 import {
   getAgentMemory,
   getPendingCleaningTasks,
@@ -301,12 +302,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [memories, profiles, shoppingItems, pendingCleaningTasks] = await Promise.all([
+    const [memories, profiles, shoppingItems, pendingCleaningTasks, currentUserId] = await Promise.all([
       getAgentMemory(familyId),
       getProfiles(familyId),
       getShoppingItems(familyId),
       getPendingCleaningTasks(familyId),
+      getScopedUserId(),
     ]);
+    const agentCtx: AgentExecutionContext = { familyId, profiles, currentUserId };
     const systemPrompt = buildSystemPrompt(memories);
     const familySnapshotText = buildFamilySnapshotText(profiles);
     const systemPromptWithFamily = `${systemPrompt}\n\n${familySnapshotText}`;
@@ -411,7 +414,7 @@ export async function POST(request: NextRequest) {
           let success = false;
           let errorMessage: string | undefined;
           try {
-            result = await executeTool(name, args, familyId);
+            result = await executeTool(name, args, agentCtx);
             const normalized = normalizeToolResult(name, result);
             success = normalized.success;
             errorMessage = normalized.error;
@@ -502,7 +505,7 @@ export async function POST(request: NextRequest) {
           let success = false;
           let errorMessage: string | undefined;
           try {
-            result = await executeTool(step.tool, stepArgs, familyId);
+            result = await executeTool(step.tool, stepArgs, agentCtx);
             const normalized = normalizeToolResult(step.tool, result);
             success = normalized.success;
             errorMessage = normalized.error;
@@ -542,7 +545,7 @@ export async function POST(request: NextRequest) {
             let success = false;
             let errorMessage: string | undefined;
             try {
-              result = await executeTool(readStep.tool, readArgs, familyId);
+              result = await executeTool(readStep.tool, readArgs, agentCtx);
               const normalized = normalizeToolResult(readStep.tool, result);
               success = normalized.success;
               errorMessage = normalized.error;

@@ -4,6 +4,7 @@ const mockGetScopedFamilyId = vi.fn();
 
 vi.mock("@/lib/family-context", () => ({
   getScopedFamilyId: mockGetScopedFamilyId,
+  getScopedUserId: vi.fn().mockResolvedValue("test-user-id"),
 }));
 
 const mockGetAgentMemory = vi.fn();

@@ -1,14 +1,15 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
-import { addKoreNote, ANDER_ID, getKoreNotes, LEIRE_ID, markNoteAsRead } from "@/lib/kore-db";
+import type { AgentExecutionContext } from "./agent-execution-context";
+import { resolveProfileIdFromAgentToken } from "@/lib/family-utils";
+import type { Profile } from "@/lib/kore-db";
+import { addKoreNote, getKoreNotes, markNoteAsRead } from "@/lib/kore-db";
 
 export const AGENT_DESCRIPTION =
-  "Experto en comunicación asíncrona entre Ander y Leire. Gestiona ÚNICAMENTE mensajes, notas y comunicación entre la pareja.";
+  "Experto en comunicación asíncrona entre miembros del hogar. Gestiona ÚNICAMENTE mensajes, notas y comunicación en el Corcho (pareja / familia).";
 
-function personToId(p: string): string | null {
-  if (p === "Ander") return ANDER_ID;
-  if (p === "Leire") return LEIRE_ID;
-  return null;
+function personToId(p: string, profiles: Profile[]): string | null {
+  return resolveProfileIdFromAgentToken(p, profiles);
 }
 
 const NAMES = new Set(["send_note", "get_unread_notes", "mark_note_read", "get_notes_history"]);
@@ -35,7 +36,7 @@ export const tools: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "get_unread_notes",
-      description: "Notas no leídas para el destinatario indicado.",
+      description: "Notas no leídas para el destinatario indicado (nombre o rol legacy Ander/Leire/Peque).",
       parameters: {
         type: "object",
         properties: {
@@ -61,22 +62,23 @@ export const tools: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "get_notes_history",
-      description: "Historial reciente de notas en ambos sentidos.",
+      description: "Historial reciente de notas en el hogar.",
       parameters: { type: "object", properties: {} },
     },
   },
 ];
 
-export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Corcho." };
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const { profiles, familyId } = ctx;
 
   switch (toolName) {
     case "send_note": {
-      const from = personToId(String(a.from ?? ""));
-      const to = personToId(String(a.to ?? ""));
+      const from = personToId(String(a.from ?? ""), profiles);
+      const to = personToId(String(a.to ?? ""), profiles);
       const content = String(a.content ?? "").trim();
       const priority = a.priority as "low" | "medium" | "high";
       if (!from || !to || from === to || !content || !priority) {
@@ -93,7 +95,7 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       return { ok: true, note: row };
     }
     case "get_unread_notes": {
-      const recipient = personToId(String(a.recipient ?? ""));
+      const recipient = personToId(String(a.recipient ?? ""), profiles);
       if (!recipient) return { error: "Destinatario inválido." };
       const notes = await getKoreNotes(familyId, recipient);
       const unread = notes.filter((n) => n.status === "unread");
@@ -106,18 +108,11 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       return { ok: true, id };
     }
     case "get_notes_history": {
-      const aNotes = await getKoreNotes(familyId, ANDER_ID);
-      const lNotes = await getKoreNotes(familyId, LEIRE_ID);
-      const merged = [...aNotes, ...lNotes].sort(
+      const notes = await getKoreNotes(familyId);
+      const sorted = [...notes].sort(
         (x, y) => new Date(y.created_at ?? "").getTime() - new Date(x.created_at ?? "").getTime(),
       );
-      const seen = new Set<string>();
-      const unique = merged.filter((n) => {
-        if (seen.has(n.id)) return false;
-        seen.add(n.id);
-        return true;
-      });
-      return { ok: true, notes: unique.slice(0, 80) };
+      return { ok: true, notes: sorted.slice(0, 80) };
     }
     default:
       return { error: "Herramienta no reconocida en Corcho." };

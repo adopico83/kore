@@ -1,12 +1,12 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
+import type { AgentExecutionContext } from "./agent-execution-context";
+import { resolveProfileIdFromAgentToken } from "@/lib/family-utils";
 import {
-  ANDER_ID,
   addCleaningTask,
   completeCleaningTask,
   getCleaningTasks,
   getPendingCleaningTasks,
-  LEIRE_ID,
 } from "@/lib/kore-db";
 
 export const AGENT_DESCRIPTION =
@@ -67,11 +67,12 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Limpieza." };
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const { familyId, profiles } = ctx;
 
   switch (toolName) {
     case "add_cleaning_task": {
@@ -79,7 +80,7 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       const task = String(a.task ?? "").trim();
       const frequency = String(a.frequency ?? "semanal");
       const assignedRaw = String(a.assigned_to ?? "");
-      const assigned_to = assignedRaw === "Ander" ? ANDER_ID : assignedRaw === "Leire" ? LEIRE_ID : undefined;
+      const assigned_to = resolveProfileIdFromAgentToken(assignedRaw, profiles) ?? undefined;
       if (!zone || !task) throw new Error("Faltan zone o task para limpieza.");
       const created = await addCleaningTask(familyId, { zone, task, frequency, assigned_to });
       return { ok: true, task: created };

@@ -1,5 +1,7 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
+import type { AgentExecutionContext } from "./agent-execution-context";
+import { displayNameForAgentPersonToken } from "@/lib/family-utils";
 import { getNightRecoveryScore, getSleepLogs, logSleepHours, logWakeup } from "@/lib/kore-db";
 
 export const AGENT_DESCRIPTION =
@@ -59,16 +61,18 @@ export const tools: ChatCompletionTool[] = [
   },
 ];
 
-export async function execute(toolName: string, args: unknown, familyId: string): Promise<unknown> {
+export async function execute(toolName: string, args: unknown, ctx: AgentExecutionContext): Promise<unknown> {
   if (!NAMES.has(toolName)) {
     return { error: "Esta petición no es competencia del subagente de Sueño." };
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const { familyId, profiles } = ctx;
 
   switch (toolName) {
     case "log_wakeup": {
-      const person = String(a.person ?? "").trim();
-      if (!person) throw new Error("Falta person para log_wakeup.");
+      const raw = String(a.person ?? "").trim();
+      if (!raw) throw new Error("Falta person para log_wakeup.");
+      const person = displayNameForAgentPersonToken(raw, profiles);
       const row = await logWakeup(familyId, {
         person,
         ...(a.reason ? { reason: String(a.reason) } : {}),
@@ -76,9 +80,10 @@ export async function execute(toolName: string, args: unknown, familyId: string)
       return { ok: true, log: row };
     }
     case "log_sleep_hours": {
-      const person = String(a.person ?? "");
+      const raw = String(a.person ?? "").trim();
       const hours = Number(a.hours);
-      if (!person || Number.isNaN(hours)) throw new Error("Datos inválidos para log_sleep_hours.");
+      if (!raw || Number.isNaN(hours)) throw new Error("Datos inválidos para log_sleep_hours.");
+      const person = displayNameForAgentPersonToken(raw, profiles);
       const row = await logSleepHours(familyId, person, hours);
       return { ok: true, log: row };
     }
