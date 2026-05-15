@@ -1,5 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  addDays,
+  computeInitialNextDueDate,
+  computeNextDueDate,
+  formatDateIso,
+  todayIsoDate,
+} from "@/lib/cleaning-schedule";
 import type { Database } from "@/types/database";
 import { getBrowserClient } from "@/lib/supabase/client";
 
@@ -77,6 +84,8 @@ export type CleaningTaskRow = {
   assigned_to: string | null;
   completed: boolean;
   created_at: string;
+  last_completed_at: string | null;
+  next_due_at: string | null;
 };
 
 export type MenuItemRow = {
@@ -95,6 +104,18 @@ export type SchoolEventRow = {
   time: string | null;
   type: string | null;
   description: string | null;
+  calendar_event_id: string | null;
+  created_at: string;
+};
+
+export type SleepSessionRow = {
+  id: string;
+  family_id: string;
+  profile_id: string;
+  sleep_start: string;
+  sleep_end: string;
+  wake_count: number;
+  notes: string | null;
   created_at: string;
 };
 
@@ -187,6 +208,12 @@ type ExtendedTables = Database["public"]["Tables"] & {
     Row: SleepLogRow;
     Insert: Omit<SleepLogRow, "id" | "logged_at"> & { id?: string; logged_at?: string };
     Update: Partial<SleepLogRow>;
+    Relationships: [];
+  };
+  sleep_sessions: {
+    Row: SleepSessionRow;
+    Insert: Omit<SleepSessionRow, "id" | "created_at"> & { id?: string; created_at?: string };
+    Update: Partial<SleepSessionRow>;
     Relationships: [];
   };
 };
@@ -596,6 +623,7 @@ export async function addCleaningTask(
     assigned_to?: string;
   },
 ): Promise<CleaningTaskRow> {
+  const now = new Date();
   const payload = {
     family_id: familyId,
     zone: data.zone,
@@ -603,35 +631,70 @@ export async function addCleaningTask(
     frequency: data.frequency ?? "semanal",
     assigned_to: data.assigned_to ?? null,
     completed: false,
+    last_completed_at: null,
+    next_due_at: computeInitialNextDueDate(now, data.frequency ?? "semanal"),
   };
-  console.log("[kore-db] addCleaningTask payload", payload);
   const { data: created, error } = await db().from("cleaning_tasks").insert(payload).select("*").single();
-  if (error) {
-    console.error("[kore-db] addCleaningTask error", {
-      message: error.message,
-      details: (error as { details?: string }).details ?? "",
-      hint: (error as { hint?: string }).hint ?? "",
-      code: (error as { code?: string }).code ?? "",
-    });
-  } else {
-    console.log("[kore-db] addCleaningTask inserted", created);
-  }
   throwDb("addCleaningTask", error);
   return created as CleaningTaskRow;
 }
 
-export async function completeCleaningTask(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("cleaning_tasks").update({ completed: true }).eq("family_id", familyId).eq("id", id);
+export async function completeCleaningTask(familyId: string, id: string): Promise<CleaningTaskRow> {
+  const { data: existing, error: readErr } = await db()
+    .from("cleaning_tasks")
+    .select("*")
+    .eq("family_id", familyId)
+    .eq("id", id)
+    .maybeSingle();
+  throwDb("completeCleaningTask.read", readErr);
+  if (!existing) throw new Error("Tarea de limpieza no encontrada.");
+
+  const now = new Date();
+  const nextDue = formatDateIso(computeNextDueDate(now, existing.frequency));
+  const { data: updated, error } = await db()
+    .from("cleaning_tasks")
+    .update({
+      last_completed_at: now.toISOString(),
+      next_due_at: nextDue,
+      completed: false,
+    })
+    .eq("family_id", familyId)
+    .eq("id", id)
+    .select("*")
+    .single();
   throwDb("completeCleaningTask", error);
+  return updated as CleaningTaskRow;
 }
 
-export async function getPendingCleaningTasks(familyId: string): Promise<CleaningTaskRow[]> {
+/** Tareas con vencimiento hoy o atrasadas (recurrencia). */
+export async function getPendingCleaningTasks(familyId: string, asOf = todayIsoDate()): Promise<CleaningTaskRow[]> {
   const { data, error } = await db()
     .from("cleaning_tasks")
     .select("*")
     .eq("family_id", familyId)
-    .eq("completed", false)
-    .order("created_at", { ascending: false });
+    .not("next_due_at", "is", null)
+    .lte("next_due_at", asOf)
+    .order("next_due_at", { ascending: true });
+  if (error) return [];
+  return data ?? [];
+}
+
+/** Próximas tareas (después de hoy, dentro de N días). */
+export async function getUpcomingCleaningTasks(
+  familyId: string,
+  withinDays = 7,
+  asOf = todayIsoDate(),
+): Promise<CleaningTaskRow[]> {
+  const endIso = formatDateIso(addDays(new Date(`${asOf}T12:00:00`), withinDays));
+
+  const { data, error } = await db()
+    .from("cleaning_tasks")
+    .select("*")
+    .eq("family_id", familyId)
+    .not("next_due_at", "is", null)
+    .gt("next_due_at", asOf)
+    .lte("next_due_at", endIso)
+    .order("next_due_at", { ascending: true });
   if (error) return [];
   return data ?? [];
 }
@@ -703,28 +766,31 @@ export async function addSchoolEvent(
     time?: string;
     type?: string;
     description?: string;
+    created_by?: string | null;
   },
 ): Promise<SchoolEventRow> {
+  const dateIso = data.date.slice(0, 10);
+  const timeStr = (data.time ?? "").trim();
+  const typeLabel = data.type?.trim();
+  const calendarTitle = typeLabel ? `${data.title} · ${typeLabel}` : data.title;
+
+  const calendarRow = await addCalendarEvent(familyId, {
+    title: calendarTitle,
+    date: dateIso,
+    time: timeStr,
+    created_by: data.created_by ?? null,
+  });
+
   const payload = {
     family_id: familyId,
     title: data.title,
-    date: data.date.slice(0, 10),
-    time: data.time ?? null,
-    type: data.type ?? null,
+    date: dateIso,
+    time: timeStr || null,
+    type: typeLabel ?? null,
     description: data.description ?? null,
+    calendar_event_id: calendarRow.id,
   };
-  console.log("[kore-db] addSchoolEvent payload", payload);
   const { data: created, error } = await db().from("school_events").insert(payload).select("*").single();
-  if (error) {
-    console.error("[kore-db] addSchoolEvent error", {
-      message: error.message,
-      details: (error as { details?: string }).details ?? "",
-      hint: (error as { hint?: string }).hint ?? "",
-      code: (error as { code?: string }).code ?? "",
-    });
-  } else {
-    console.log("[kore-db] addSchoolEvent inserted", created);
-  }
   throwDb("addSchoolEvent", error);
   return created as SchoolEventRow;
 }
@@ -760,6 +826,19 @@ export async function completeSchoolMaterial(familyId: string, id: string): Prom
 }
 
 export async function deleteSchoolItem(familyId: string, id: string, type: "event" | "material"): Promise<void> {
+  if (type === "event") {
+    const { data: row, error: readErr } = await db()
+      .from("school_events")
+      .select("calendar_event_id")
+      .eq("family_id", familyId)
+      .eq("id", id)
+      .maybeSingle();
+    throwDb("deleteSchoolItem.read", readErr);
+    const calendarId = row?.calendar_event_id;
+    if (calendarId) {
+      await deleteCalendarEvent(familyId, calendarId);
+    }
+  }
   const table = type === "event" ? "school_events" : "school_materials";
   const { error } = await db().from(table).delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteSchoolItem", error);
@@ -814,6 +893,81 @@ export async function logPersonalTime(
   const { data: created, error } = await db().from("leisure_activities").insert(payload).select("*").single();
   throwDb("logPersonalTime", error);
   return created as LeisureActivityRow;
+}
+
+export function sleepSessionDurationHours(sleepStart: string, sleepEnd: string): number {
+  const ms = new Date(sleepEnd).getTime() - new Date(sleepStart).getTime();
+  if (Number.isNaN(ms) || ms <= 0) return 0;
+  return Math.round((ms / 3_600_000) * 10) / 10;
+}
+
+export async function addSleepSession(
+  familyId: string,
+  data: {
+    profile_id: string;
+    sleep_start: string;
+    sleep_end: string;
+    wake_count?: number;
+    notes?: string | null;
+  },
+): Promise<SleepSessionRow> {
+  const payload = {
+    family_id: familyId,
+    profile_id: data.profile_id,
+    sleep_start: data.sleep_start,
+    sleep_end: data.sleep_end,
+    wake_count: Math.max(0, Math.round(data.wake_count ?? 0)),
+    notes: data.notes?.trim() ? data.notes.trim() : null,
+  };
+  const { data: created, error } = await db().from("sleep_sessions").insert(payload).select("*").single();
+  throwDb("addSleepSession", error);
+  return created as SleepSessionRow;
+}
+
+export async function getSleepSessions(familyId: string, days = 7): Promise<SleepSessionRow[]> {
+  const cutoff = new Date(Date.now() - Math.max(1, days) * 24 * 3600 * 1000).toISOString();
+  const { data, error } = await db()
+    .from("sleep_sessions")
+    .select("*")
+    .eq("family_id", familyId)
+    .gte("sleep_start", cutoff)
+    .order("sleep_start", { ascending: false });
+  if (error) return [];
+  return data ?? [];
+}
+
+export async function deleteSleepSession(familyId: string, id: string): Promise<void> {
+  const { error } = await db().from("sleep_sessions").delete().eq("family_id", familyId).eq("id", id);
+  throwDb("deleteSleepSession", error);
+}
+
+export type SleepSummaryByPerson = {
+  person_id: string;
+  sessions: number;
+  avg_hours: number;
+  total_wake_count: number;
+};
+
+export async function getSleepSummaryFromSessions(
+  familyId: string,
+  days = 7,
+): Promise<{ days: number; sessions: SleepSessionRow[]; by_person: SleepSummaryByPerson[] }> {
+  const sessions = await getSleepSessions(familyId, days);
+  const byPerson = new Map<string, { hours: number[]; wakes: number }>();
+  for (const s of sessions) {
+    const bucket = byPerson.get(s.profile_id) ?? { hours: [], wakes: 0 };
+    bucket.hours.push(sleepSessionDurationHours(s.sleep_start, s.sleep_end));
+    bucket.wakes += s.wake_count;
+    byPerson.set(s.profile_id, bucket);
+  }
+  const summary: SleepSummaryByPerson[] = [...byPerson.entries()].map(([person_id, b]) => ({
+    person_id,
+    sessions: b.hours.length,
+    avg_hours:
+      b.hours.length > 0 ? Math.round((b.hours.reduce((a, c) => a + c, 0) / b.hours.length) * 10) / 10 : 0,
+    total_wake_count: b.wakes,
+  }));
+  return { days, sessions, by_person: summary };
 }
 
 export async function logWakeup(familyId: string, data: { person: string; reason?: string }): Promise<SleepLogRow> {

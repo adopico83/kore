@@ -14,7 +14,8 @@ import {
   getShoppingItems,
   getPendingCleaningTasks,
   getWeeklyMenu,
-  getSleepLogs,
+  getSleepSessions,
+  getSchoolEvents,
   type Profile,
 } from "@/lib/kore-db";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -92,7 +93,8 @@ export default async function Home() {
         initialShoppingItems={[]}
         initialPendingCleaningTasks={[]}
         initialWeeklyMenu={[]}
-        initialSleepLogs={[]}
+        initialSleepSessions={[]}
+        initialSchoolEvents={[]}
       />
     );
   }
@@ -107,7 +109,8 @@ export default async function Home() {
     initialShoppingItems,
     initialPendingCleaningTasks,
     initialWeeklyMenu,
-    initialSleepLogs,
+    initialSleepSessions,
+    initialSchoolEvents,
   ] = await Promise.all([
     getProfiles(familyId),
     getDomains(familyId),
@@ -118,7 +121,8 @@ export default async function Home() {
     getShoppingItems(familyId),
     getPendingCleaningTasks(familyId),
     getWeeklyMenu(familyId),
-    getSleepLogs(familyId, 7),
+    getSleepSessions(familyId, 14),
+    getSchoolEvents(familyId),
   ]);
 
   const initialDomains = initialDomainsAll.filter((domain) => domain.is_active === true);
@@ -146,7 +150,8 @@ export default async function Home() {
       initialShoppingItems={initialShoppingItems}
       initialPendingCleaningTasks={initialPendingCleaningTasks}
       initialWeeklyMenu={initialWeeklyMenu}
-      initialSleepLogs={initialSleepLogs}
+      initialSleepSessions={initialSleepSessions}
+      initialSchoolEvents={initialSchoolEvents}
     />
   );
 }

@@ -11,9 +11,10 @@ import {
   getShoppingItems,
   reactivateShoppingItem,
 } from "@/lib/actions/shopping";
-import {
-  type ShoppingItemRow,
-} from "@/lib/kore-db";
+import { CleaningDomainPanel } from "@/components/domain-panels/CleaningDomainPanel";
+import { SchoolDomainPanel } from "@/components/domain-panels/SchoolDomainPanel";
+import { SleepDomainPanel } from "@/components/domain-panels/SleepDomainPanel";
+import { type Profile, type ShoppingItemRow } from "@/lib/kore-db";
 
 export type DomainItem = {
   id: string;
@@ -36,6 +37,8 @@ export type DomainModalProps = {
   historyEntries?: DomainHistoryEntry[];
   /** Si true, el historial no permite borrar entradas (no hay API de borrado). */
   historyReadOnly?: boolean;
+  /** Perfiles familiares (paneles Limpieza / Sueño). */
+  profiles?: Profile[];
 };
 
 const cardStyle: CSSProperties = {
@@ -45,8 +48,29 @@ const cardStyle: CSSProperties = {
   padding: 12,
 };
 
+function normalizeDomainName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 function isComprasDomainName(name: string): boolean {
-  return name.trim().toLowerCase() === "compras";
+  return normalizeDomainName(name) === "compras";
+}
+
+function isLimpiezaDomainName(name: string): boolean {
+  return normalizeDomainName(name) === "limpieza";
+}
+
+function isSuenoDomainName(name: string): boolean {
+  const n = normalizeDomainName(name);
+  return n === "sueño" || n === "sueno";
+}
+
+function isColegioDomainName(name: string): boolean {
+  return normalizeDomainName(name) === "colegio";
+}
+
+function hasStructuredDataPanel(name: string): boolean {
+  return isLimpiezaDomainName(name) || isSuenoDomainName(name) || isColegioDomainName(name);
 }
 
 export function DomainModal({
@@ -57,9 +81,11 @@ export function DomainModal({
   onSave,
   historyEntries,
   historyReadOnly,
+  profiles = [],
 }: DomainModalProps) {
   useEscapeKey(onClose);
   const isCompras = isComprasDomainName(domain.name);
+  const isDataPanel = hasStructuredDataPanel(domain.name);
 
   const [owner, setOwner] = useState(domain.owner);
   const [stateText, setStateText] = useState(domain.state);
@@ -197,7 +223,7 @@ export function DomainModal({
     }
   };
 
-  const notesToSave = isCompras ? (domain.notes ?? []) : notes;
+  const notesToSave = isCompras || isDataPanel ? (domain.notes ?? []) : notes;
   const safeMembers = members ?? [];
   const ownerOptions = useMemo(() => [...safeMembers, "Sin asignar"], [safeMembers]);
 
@@ -293,7 +319,13 @@ export function DomainModal({
           />
         </section>
 
-        {isCompras ? (
+        {isDataPanel ? (
+          <section style={cardStyle}>
+            {isLimpiezaDomainName(domain.name) ? <CleaningDomainPanel profiles={profiles} /> : null}
+            {isSuenoDomainName(domain.name) ? <SleepDomainPanel profiles={profiles} /> : null}
+            {isColegioDomainName(domain.name) ? <SchoolDomainPanel /> : null}
+          </section>
+        ) : isCompras ? (
           <section style={cardStyle}>
             <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Pendientes</p>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>

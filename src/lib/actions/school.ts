@@ -1,13 +1,10 @@
 "use server";
 
-import { getScopedFamilyId } from "@/lib/family-context";
+import { getScopedFamilyId, getScopedUserId } from "@/lib/family-context";
 import {
   addSchoolEvent as dbAddSchoolEvent,
-  addSchoolMaterial as dbAddSchoolMaterial,
-  completeSchoolMaterial as dbCompleteSchoolMaterial,
   deleteSchoolItem as dbDeleteSchoolItem,
   getSchoolEvents as dbGetSchoolEvents,
-  getSchoolMaterials as dbGetSchoolMaterials,
 } from "@/lib/kore-db";
 
 async function requireFamilyId(): Promise<string> {
@@ -29,25 +26,14 @@ export async function addSchoolEvent(data: {
   description?: string;
 }) {
   const familyId = await requireFamilyId();
-  return dbAddSchoolEvent(familyId, data);
+  const userId = await getScopedUserId();
+  return dbAddSchoolEvent(familyId, {
+    ...data,
+    created_by: userId,
+  });
 }
 
-export async function getSchoolMaterials() {
+export async function deleteSchoolEvent(id: string) {
   const familyId = await requireFamilyId();
-  return dbGetSchoolMaterials(familyId);
-}
-
-export async function addSchoolMaterial(data: { item: string; urgency?: string }) {
-  const familyId = await requireFamilyId();
-  return dbAddSchoolMaterial(familyId, data);
-}
-
-export async function completeSchoolMaterial(id: string) {
-  const familyId = await requireFamilyId();
-  return dbCompleteSchoolMaterial(familyId, id);
-}
-
-export async function deleteSchoolItem(id: string, type: "event" | "material") {
-  const familyId = await requireFamilyId();
-  return dbDeleteSchoolItem(familyId, id, type);
+  return dbDeleteSchoolItem(familyId, id, "event");
 }

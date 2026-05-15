@@ -17,6 +17,8 @@ const REALTIME_TABLES = [
   "cleaning_tasks",
   "menu_items",
   "sleep_logs",
+  "sleep_sessions",
+  "school_events",
 ] as const;
 
 export type KoreRealtimeTable = (typeof REALTIME_TABLES)[number];

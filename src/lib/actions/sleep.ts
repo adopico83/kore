@@ -2,10 +2,9 @@
 
 import { getScopedFamilyId } from "@/lib/family-context";
 import {
-  getNightRecoveryScore as dbGetNightRecoveryScore,
-  getSleepLogs as dbGetSleepLogs,
-  logSleepHours as dbLogSleepHours,
-  logWakeup as dbLogWakeup,
+  addSleepSession as dbAddSleepSession,
+  deleteSleepSession as dbDeleteSleepSession,
+  getSleepSessions as dbGetSleepSessions,
 } from "@/lib/kore-db";
 
 async function requireFamilyId(): Promise<string> {
@@ -14,22 +13,23 @@ async function requireFamilyId(): Promise<string> {
   return familyId;
 }
 
-export async function getSleepLogs(days = 7) {
+export async function getSleepSessions(days = 14) {
   const familyId = await requireFamilyId();
-  return dbGetSleepLogs(familyId, days);
+  return dbGetSleepSessions(familyId, days);
 }
 
-export async function logWakeup(data: { person: string; reason?: string }) {
+export async function addSleepSession(data: {
+  profile_id: string;
+  sleep_start: string;
+  sleep_end: string;
+  wake_count?: number;
+  notes?: string | null;
+}) {
   const familyId = await requireFamilyId();
-  return dbLogWakeup(familyId, data);
+  return dbAddSleepSession(familyId, data);
 }
 
-export async function logSleepHours(person: string, hours: number) {
+export async function deleteSleepSession(id: string) {
   const familyId = await requireFamilyId();
-  return dbLogSleepHours(familyId, person, hours);
-}
-
-export async function getNightRecoveryScore() {
-  const familyId = await requireFamilyId();
-  return dbGetNightRecoveryScore(familyId);
+  return dbDeleteSleepSession(familyId, id);
 }

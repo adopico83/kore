@@ -20,19 +20,21 @@ const NAMES = new Set([
   "delete_school_item",
 ]);
 
+const SCHOOL_EVENT_TYPES = ["excursion", "examen", "reunion", "actividad", "otro"] as const;
+
 export const tools: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
       name: "add_school_event",
-      description: "Añade un evento escolar.",
+      description: "Añade un evento escolar y lo sincroniza con la agenda familiar.",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string" },
-          date: { type: "string" },
-          time: { type: "string" },
-          type: { type: "string", enum: ["excursion", "reunion", "actividad", "otro"] },
+          date: { type: "string", description: "YYYY-MM-DD" },
+          time: { type: "string", description: "HH:MM opcional" },
+          type: { type: "string", enum: [...SCHOOL_EVENT_TYPES] },
           description: { type: "string" },
         },
         required: ["title", "date", "type"],
@@ -105,6 +107,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         time: a.time ? String(a.time) : undefined,
         type,
         description: a.description ? String(a.description) : undefined,
+        created_by: ctx.currentUserId ?? null,
       });
       return { ok: true, event: ev };
     }

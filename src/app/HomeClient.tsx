@@ -28,7 +28,9 @@ import {
   type ShoppingItemRow,
   type CleaningTaskRow,
   type MenuItemRow,
-  type SleepLogRow,
+  type SchoolEventRow,
+  type SleepSessionRow,
+  sleepSessionDurationHours,
 } from "@/lib/kore-db";
 import { getProfiles, updateStressLevel } from "@/lib/actions/profiles";
 import {
@@ -52,7 +54,8 @@ import {
 import { getShoppingItems } from "@/lib/actions/shopping";
 import { getPendingCleaningTasks } from "@/lib/actions/cleaning";
 import { getWeeklyMenu } from "@/lib/actions/menu";
-import { getSleepLogs } from "@/lib/actions/sleep";
+import { getSchoolEvents } from "@/lib/actions/school";
+import { getSleepSessions } from "@/lib/actions/sleep";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
 import { getFamilyContext, resolvePartnerProfile, shouldShowPartnerInviteWidget } from "@/lib/family-utils";
@@ -230,7 +233,8 @@ type HomeClientProps = {
   initialShoppingItems: ShoppingItemRow[];
   initialPendingCleaningTasks: CleaningTaskRow[];
   initialWeeklyMenu: MenuItemRow[];
-  initialSleepLogs: SleepLogRow[];
+  initialSleepSessions: SleepSessionRow[];
+  initialSchoolEvents: SchoolEventRow[];
 };
 
 type MemberHealthData = {
@@ -388,15 +392,35 @@ function enrichLimpiezaDomain(domain: DomainCard, rows: Awaited<ReturnType<typeo
   };
 }
 
-function enrichSuenoDomain(domain: DomainCard, rows: Awaited<ReturnType<typeof getSleepLogs>>): DomainCard {
+function enrichSuenoDomain(
+  domain: DomainCard,
+  sessions: SleepSessionRow[],
+  profiles: Profile[],
+): DomainCard {
   if (domain.name !== "Sueño") return domain;
-  const notes = rows.slice(0, 3).map((r) => {
-    const detail = r.type === "sleep_hours" && r.hours != null ? `${r.hours}h` : r.reason ?? r.type;
-    return `${r.person}: ${detail}`;
+  const nameFor = (id: string) => profiles.find((p) => p.id === id)?.name ?? "?";
+  const notes = sessions.slice(0, 3).map((s) => {
+    const hours = sleepSessionDurationHours(s.sleep_start, s.sleep_end);
+    return `${nameFor(s.profile_id)}: ${hours}h`;
   });
   return {
     ...domain,
-    state: rows.length > 0 ? `Últimos registros: ${rows.length}` : "Sin registros recientes",
+    state: sessions.length > 0 ? `${sessions.length} sesión${sessions.length === 1 ? "" : "es"} (14 días)` : "Sin sesiones recientes",
+    notes,
+  };
+}
+
+function enrichColegioDomain(domain: DomainCard, events: SchoolEventRow[]): DomainCard {
+  if (domain.name !== "Colegio") return domain;
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = events.filter((e) => (e.date ?? "").slice(0, 10) >= today);
+  const notes = upcoming.slice(0, 3).map((e) => {
+    const d = (e.date ?? "").slice(5).replace("-", "/");
+    return `${d}: ${e.title}`;
+  });
+  return {
+    ...domain,
+    state: upcoming.length > 0 ? `${upcoming.length} evento${upcoming.length === 1 ? "" : "s"} próximo${upcoming.length === 1 ? "" : "s"}` : "Sin eventos próximos",
     notes,
   };
 }
@@ -424,7 +448,8 @@ export function HomeClient({
   initialShoppingItems = [],
   initialPendingCleaningTasks = [],
   initialWeeklyMenu = [],
-  initialSleepLogs = [],
+  initialSleepSessions = [],
+  initialSchoolEvents = [],
 }: HomeClientProps) {
   const safeInitialProfiles = useMemo(() => initialProfiles ?? [], [initialProfiles]);
   const [line1, line2] = familyName.split(/[-\/\s]/, 2);
@@ -458,15 +483,19 @@ export function HomeClient({
   const [domains, setDomains] = useState<DomainCard[]>(() => {
     const activeInitialDomains = (initialDomains ?? []).filter((row) => row.is_active === true);
     const mapped = activeInitialDomains.map((row) =>
-      enrichSuenoDomain(
-        enrichLimpiezaDomain(
-          enrichMenuDomain(
-            enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), initialShoppingItems ?? []),
-            initialWeeklyMenu ?? [],
+      enrichColegioDomain(
+        enrichSuenoDomain(
+          enrichLimpiezaDomain(
+            enrichMenuDomain(
+              enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), initialShoppingItems ?? []),
+              initialWeeklyMenu ?? [],
+            ),
+            initialPendingCleaningTasks ?? [],
           ),
-          initialPendingCleaningTasks ?? [],
+          initialSleepSessions ?? [],
+          safeInitialProfiles,
         ),
-        initialSleepLogs ?? [],
+        initialSchoolEvents ?? [],
       ),
     );
     return mergeDomainsWithFallback(mapped, DOMAINS);
@@ -541,24 +570,29 @@ export function HomeClient({
 
   const loadDomains = useCallback(async () => {
     try {
-      const [rows, shoppingItems, cleaningTasks, weeklyMenu, sleepLogs] = await Promise.all([
+      const [rows, shoppingItems, cleaningTasks, weeklyMenu, sleepSessions, schoolEvents] = await Promise.all([
         getDomains(),
         getShoppingItems(),
         getPendingCleaningTasks(),
         getWeeklyMenu(),
-        getSleepLogs(7),
+        getSleepSessions(14),
+        getSchoolEvents(),
       ]);
       const activeRows = rows.filter((row) => row.is_active === true);
       const mapped = activeRows.map((row) =>
-        enrichSuenoDomain(
-          enrichLimpiezaDomain(
-            enrichMenuDomain(
-              enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), shoppingItems),
-              weeklyMenu,
+        enrichColegioDomain(
+          enrichSuenoDomain(
+            enrichLimpiezaDomain(
+              enrichMenuDomain(
+                enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), shoppingItems),
+                weeklyMenu,
+              ),
+              cleaningTasks,
             ),
-            cleaningTasks,
+            sleepSessions,
+            safeInitialProfiles,
           ),
-          sleepLogs,
+          schoolEvents,
         ),
       );
       setDomains(mergeDomainsWithFallback(mapped, DOMAINS));
@@ -732,7 +766,8 @@ export function HomeClient({
           else if (table === "shopping_items") void loadDomains();
           else if (table === "cleaning_tasks") void loadDomains();
           else if (table === "menu_items") void loadDomains();
-          else if (table === "sleep_logs") void loadDomains();
+          else if (table === "sleep_logs" || table === "sleep_sessions") void loadDomains();
+          else if (table === "school_events") void loadDomains();
           else if (table === "calendar_events") void loadAgenda();
           else if (table === "expenses") void loadExpenses();
           else if (table === "health_records") void loadSalud();
@@ -754,7 +789,8 @@ export function HomeClient({
       if (tables.includes("shopping_items")) void loadDomains();
       if (tables.includes("cleaning_tasks")) void loadDomains();
       if (tables.includes("menu_items")) void loadDomains();
-      if (tables.includes("sleep_logs")) void loadDomains();
+      if (tables.includes("sleep_logs") || tables.includes("sleep_sessions")) void loadDomains();
+      if (tables.includes("school_events")) void loadDomains();
       if (tables.includes("profiles")) void loadProfiles();
     });
   }, [loadAgenda, loadCorcho, loadDomains, loadExpenses, loadProfiles, loadSalud]);
@@ -2183,6 +2219,7 @@ export function HomeClient({
           onSave={handleSaveDomain}
           historyEntries={domainHistoryList}
           historyReadOnly
+          profiles={safeInitialProfiles}
         />
       ) : null}
 

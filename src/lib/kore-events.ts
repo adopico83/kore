@@ -12,6 +12,7 @@ export type KoreTable =
   | "school_materials"
   | "leisure_activities"
   | "sleep_logs"
+  | "sleep_sessions"
   | "agent_memory";
 
 export function emitKoreUpdate(tables: KoreTable[]) {

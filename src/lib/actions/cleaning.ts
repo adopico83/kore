@@ -6,6 +6,7 @@ import {
   completeCleaningTask as dbCompleteCleaningTask,
   getCleaningTasks as dbGetCleaningTasks,
   getPendingCleaningTasks as dbGetPendingCleaningTasks,
+  getUpcomingCleaningTasks as dbGetUpcomingCleaningTasks,
 } from "@/lib/kore-db";
 
 async function requireFamilyId(): Promise<string> {
@@ -37,4 +38,9 @@ export async function completeCleaningTask(id: string) {
 export async function getPendingCleaningTasks() {
   const familyId = await requireFamilyId();
   return dbGetPendingCleaningTasks(familyId);
+}
+
+export async function getUpcomingCleaningTasks(withinDays = 7) {
+  const familyId = await requireFamilyId();
+  return dbGetUpcomingCleaningTasks(familyId, withinDays);
 }
