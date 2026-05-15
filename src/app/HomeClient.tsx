@@ -56,6 +56,7 @@ import { getPendingCleaningTasks } from "@/lib/actions/cleaning";
 import { getWeeklyMenu } from "@/lib/actions/menu";
 import { getSchoolEvents } from "@/lib/actions/school";
 import { getSleepSessions } from "@/lib/actions/sleep";
+import { subscribeToNotificationsAction } from "@/lib/actions/push";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
 import { getFamilyContext, resolvePartnerProfile, shouldShowPartnerInviteWidget } from "@/lib/family-utils";
@@ -91,6 +92,18 @@ const SKEL = {
   fg: "rgba(255, 255, 255, 0.12)",
   line: "rgba(255, 255, 255, 0.08)",
 } as const;
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const paddingLength = (4 - (base64String.length % 4)) % 4;
+  const padding = "=".repeat(paddingLength);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
 
 const sectionLabel: CSSProperties = {
   fontSize: "10px",
@@ -524,6 +537,10 @@ export function HomeClient({
   const [stressByProfileId, setStressByProfileId] = useState<Record<string, number>>(() =>
     Object.fromEntries((safeInitialProfiles ?? []).map((p) => [p.id, Math.min(10, Math.max(1, Math.round(p.stress_level ?? 5)))])),
   );
+  const [pushSupported, setPushSupported] = useState(false);
+  /** Solo true con permiso explícito "granted" y suscripción push; el botón se oculta cuando es true. */
+  const [pushNotificationsActive, setPushNotificationsActive] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
 
   const familyContext = useMemo(
     () => getFamilyContext(safeInitialProfiles, currentUserId),
@@ -551,6 +568,65 @@ export function HomeClient({
       /* ignore */
     }
   }, [initialInviteCode]);
+
+  useEffect(() => {
+    setPushSupported(
+      typeof window !== "undefined" &&
+        "serviceWorker" in navigator &&
+        "PushManager" in window &&
+        "Notification" in window,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!pushSupported) return;
+    void (async () => {
+      try {
+        if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+          setPushNotificationsActive(false);
+          return;
+        }
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        setPushNotificationsActive(!!sub);
+      } catch {
+        setPushNotificationsActive(false);
+      }
+    })();
+  }, [pushSupported]);
+
+  const handlePushToggle = useCallback(async () => {
+    if (!pushSupported || safeInitialProfiles.length === 0) return;
+    const vapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
+    if (!vapid) return;
+    setPushBusy(true);
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") return;
+
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapid),
+        });
+      }
+
+      const asJson = sub.toJSON();
+      const endpoint = asJson.endpoint;
+      const p256dh = asJson.keys?.p256dh;
+      const auth = asJson.keys?.auth;
+      if (!endpoint || !p256dh || !auth) throw new Error("Suscripción incompleta");
+      const deviceType = /Mobile|Android|iPhone/i.test(navigator.userAgent) ? "mobile" : "desktop";
+      await subscribeToNotificationsAction({ endpoint, keys: { p256dh, auth } }, deviceType);
+      setPushNotificationsActive(true);
+    } catch {
+      /* sin toast: UX silenciosa */
+    } finally {
+      setPushBusy(false);
+    }
+  }, [pushSupported, safeInitialProfiles.length]);
 
   const corchoPartner = useMemo(
     () => resolvePartnerProfile(familyContext.adults, currentUserId),
@@ -1104,7 +1180,30 @@ export function HomeClient({
             </>
           ) : null}
         </div>
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, position: "relative", gap: 8 }}>
+          {pushSupported && safeInitialProfiles.length > 0 && !pushNotificationsActive ? (
+            <button
+              type="button"
+              onClick={() => void handlePushToggle()}
+              disabled={pushBusy}
+              aria-label="Activar notificaciones push"
+              title="Activar/desactivar notificaciones push"
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: C.muted,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 8,
+                padding: "6px 9px",
+                cursor: pushBusy ? "wait" : "pointer",
+                whiteSpace: "nowrap",
+                opacity: pushBusy ? 0.65 : 1,
+              }}
+            >
+              🔔 Notificaciones
+            </button>
+          ) : null}
           {familyContext.adults.slice(0, 2).map((profile, index) => {
             const stress = stressByProfileId[profile.id] ?? 5;
             return (

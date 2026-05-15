@@ -7,7 +7,7 @@ import {
   formatDateIso,
   todayIsoDate,
 } from "@/lib/cleaning-schedule";
-import type { Database } from "@/types/database";
+import type { Database, Json } from "@/types/database";
 import { getBrowserClient } from "@/lib/supabase/client";
 
 export const ANDER_ID = "6204d1a5-bbba-4a01-a9f2-b0742ee0bcd4";
@@ -144,6 +144,38 @@ export type SleepLogRow = {
   hours: number | null;
   logged_at: string;
 };
+
+/** Serialización de PushSubscription (navegador / web-push). */
+export type PushSubscriptionJSON = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  expirationTime?: number | null;
+};
+
+/** Objeto listo para `web-push` / `PushManager.subscribe` resultado. */
+export type WebPushSubscriptionPayload = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  expirationTime?: number | null;
+};
+
+export type PushSubscriptionRow = Database["public"]["Tables"]["push_subscriptions"]["Row"];
+
+export function parseSubscriptionDataToWebPush(data: Json | null): WebPushSubscriptionPayload | null {
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
+  const o = data as Record<string, unknown>;
+  const endpoint = typeof o.endpoint === "string" ? o.endpoint : "";
+  const keysRaw = o.keys;
+  if (!keysRaw || typeof keysRaw !== "object" || Array.isArray(keysRaw)) return null;
+  const keys = keysRaw as Record<string, unknown>;
+  const p256dh = typeof keys.p256dh === "string" ? keys.p256dh : "";
+  const auth = typeof keys.auth === "string" ? keys.auth : "";
+  if (!endpoint || !p256dh || !auth) return null;
+  const out: WebPushSubscriptionPayload = { endpoint, keys: { p256dh, auth } };
+  if (typeof o.expirationTime === "number") out.expirationTime = o.expirationTime;
+  else if (o.expirationTime === null) out.expirationTime = null;
+  return out;
+}
 
 type ExtendedTables = Database["public"]["Tables"] & {
   calendar_events: {
@@ -1026,4 +1058,57 @@ export async function getNightRecoveryScore(
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const metric = await getDailyMetrics(familyId, date);
   return { date, night_recovery_score: metric?.night_recovery_score ?? null };
+}
+
+export async function saveSubscription(
+  profileId: string,
+  familyId: string,
+  subscription: PushSubscriptionJSON,
+  deviceType?: string | null,
+): Promise<PushSubscriptionRow> {
+  const { data: existing, error: selErr } = await db()
+    .from("push_subscriptions")
+    .select("id, subscription_data")
+    .eq("profile_id", profileId);
+  throwDb("saveSubscription.select", selErr);
+
+  for (const row of existing ?? []) {
+    const parsed = parseSubscriptionDataToWebPush(row.subscription_data as Json);
+    if (parsed?.endpoint === subscription.endpoint) {
+      const { error: delOne } = await db().from("push_subscriptions").delete().eq("id", row.id);
+      throwDb("saveSubscription.delete", delOne);
+    }
+  }
+
+  const payload = {
+    profile_id: profileId,
+    family_id: familyId,
+    subscription_data: subscription as unknown as Json,
+    device_type: deviceType?.trim() || null,
+  };
+  const { data, error } = await db().from("push_subscriptions").insert(payload).select("*").single();
+  throwDb("saveSubscription", error);
+  return data as PushSubscriptionRow;
+}
+
+export async function getSubscriptionsByFamily(
+  familyId: string,
+): Promise<{ id: string; subscription: WebPushSubscriptionPayload }[]> {
+  const { data, error } = await db()
+    .from("push_subscriptions")
+    .select("id, subscription_data")
+    .eq("family_id", familyId)
+    .order("created_at", { ascending: false });
+  if (error) return [];
+  const out: { id: string; subscription: WebPushSubscriptionPayload }[] = [];
+  for (const row of data ?? []) {
+    const sub = parseSubscriptionDataToWebPush(row.subscription_data as Json);
+    if (sub) out.push({ id: row.id, subscription: sub });
+  }
+  return out;
+}
+
+export async function deleteSubscription(profileId: string): Promise<void> {
+  const { error } = await db().from("push_subscriptions").delete().eq("profile_id", profileId);
+  throwDb("deleteSubscription", error);
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Mono, DM_Sans } from "next/font/google";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -33,7 +34,10 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="icon" href="/icon-192.png" />
       </head>
-      <body className={`${dmSans.variable} ${dmMono.variable} min-h-full flex flex-col`}>{children}</body>
+      <body className={`${dmSans.variable} ${dmMono.variable} min-h-full flex flex-col`}>
+        <ServiceWorkerRegister />
+        {children}
+      </body>
     </html>
   );
 }

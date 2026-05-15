@@ -812,6 +812,48 @@ export type Database = {
           },
         ]
       }
+      push_subscriptions: {
+        Row: {
+          id: string
+          profile_id: string
+          family_id: string
+          subscription_data: Json
+          device_type: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          profile_id: string
+          family_id: string
+          subscription_data: Json
+          device_type?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          profile_id?: string
+          family_id?: string
+          subscription_data?: Json
+          device_type?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_subscriptions_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       school_events: {
         Row: {
           created_at: string | null
