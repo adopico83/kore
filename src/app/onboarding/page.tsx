@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
 import { completeOnboardingAction } from "@/lib/actions/onboarding";
@@ -326,6 +327,7 @@ function OnboardingPageContent() {
           background: "#090b10",
           color: "#e4e6ed",
           display: "flex",
+          flexDirection: "column",
           justifyContent: "center",
           alignItems: "center",
           padding: 16,
@@ -338,6 +340,21 @@ function OnboardingPageContent() {
         >
           <OnboardingFamilyGate />
         </Suspense>
+        <Link
+          href="/login"
+          style={{
+            marginTop: 12,
+            fontSize: 13,
+            color: "rgba(228,230,237,0.55)",
+            cursor: "pointer",
+            textAlign: "center",
+            textDecoration: "underline",
+            textDecorationColor: "rgba(228,230,237,0.28)",
+            textUnderlineOffset: "4px",
+          }}
+        >
+          Ya tengo cuenta · Iniciar sesión
+        </Link>
       </main>
     );
   }
