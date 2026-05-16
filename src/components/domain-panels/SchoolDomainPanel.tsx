@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { addSchoolEvent, deleteSchoolEvent, getSchoolEvents } from "@/lib/actions/school";
 import type { SchoolEventRow } from "@/lib/kore-db";
@@ -18,6 +18,17 @@ const fieldStyle: CSSProperties = {
   boxSizing: "border-box",
 };
 
+/** date/time en iOS PWA: contraste y área táctil explícitos */
+const dateTimeFieldStyle: CSSProperties = {
+  ...fieldStyle,
+  width: "100%",
+  display: "block",
+  minHeight: 44,
+  color: "#e4e6ed",
+  backgroundColor: "rgba(255,255,255,0.05)",
+  colorScheme: "dark",
+};
+
 const EVENT_TYPES = ["reunion", "entrega", "excursion", "examen", "otro"] as const;
 
 function formatDateLabel(date: string): string {
@@ -26,23 +37,31 @@ function formatDateLabel(date: string): string {
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "No se pudo añadir el evento.";
+}
+
 export function SchoolDomainPanel() {
   const [events, setEvents] = useState<SchoolEventRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [type, setType] = useState<(typeof EVENT_TYPES)[number]>("otro");
   const [description, setDescription] = useState("");
 
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
   const reload = useCallback(async () => {
-    setLoading(true);
+    setEventsLoading(true);
     try {
       const rows = await getSchoolEvents();
-      const today = new Date().toISOString().slice(0, 10);
-      setEvents(rows.filter((e) => (e.date ?? "").slice(0, 10) >= today));
+      const todayIso = new Date().toISOString().slice(0, 10);
+      setEvents(rows.filter((e) => (e.date ?? "").slice(0, 10) >= todayIso));
     } finally {
-      setLoading(false);
+      setEventsLoading(false);
     }
   }, []);
 
@@ -51,21 +70,37 @@ export function SchoolDomainPanel() {
   }, [reload]);
 
   const onAdd = async () => {
-    if (!title.trim() || !date) return;
-    await addSchoolEvent({
-      title: title.trim(),
-      date,
-      time: time.trim() || undefined,
-      type,
-      description: description.trim() || undefined,
-    });
-    emitKoreUpdate(["school_events", "calendar_events"]);
-    setTitle("");
-    setDate("");
-    setTime("");
-    setType("otro");
-    setDescription("");
-    await reload();
+    setError(null);
+    if (!title.trim()) {
+      setError("El título es obligatorio.");
+      return;
+    }
+    if (!date) {
+      setError("La fecha es obligatoria.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await addSchoolEvent({
+        title: title.trim(),
+        date,
+        time: time.trim() || undefined,
+        type,
+        description: description.trim() || undefined,
+      });
+      emitKoreUpdate(["school_events", "calendar_events"]);
+      setTitle("");
+      setDate("");
+      setTime("");
+      setType("otro");
+      setDescription("");
+      await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onDelete = async (id: string) => {
@@ -82,8 +117,14 @@ export function SchoolDomainPanel() {
         <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Nuevo evento escolar</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <input placeholder="Título" value={title} onChange={(e) => setTitle(e.target.value)} style={fieldStyle} />
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={fieldStyle} />
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={fieldStyle} />
+          <input
+            type="date"
+            value={date}
+            min={today}
+            onChange={(e) => setDate(e.target.value)}
+            style={dateTimeFieldStyle}
+          />
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={dateTimeFieldStyle} />
           <select value={type} onChange={(e) => setType(e.target.value as (typeof EVENT_TYPES)[number])} style={fieldStyle}>
             {EVENT_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -95,6 +136,7 @@ export function SchoolDomainPanel() {
           <button
             type="button"
             onClick={() => void onAdd()}
+            disabled={loading}
             style={{
               border: "none",
               borderRadius: 8,
@@ -102,14 +144,20 @@ export function SchoolDomainPanel() {
               color: "#fff",
               padding: "10px 12px",
               fontWeight: 700,
-              cursor: "pointer",
+              cursor: loading ? "wait" : "pointer",
+              opacity: loading ? 0.7 : 1,
             }}
           >
-            Añadir y sincronizar agenda
+            {loading ? "Guardando…" : "Añadir y sincronizar agenda"}
           </button>
+          {error ? (
+            <p style={{ margin: 0, fontSize: 12, color: "#E05555", lineHeight: 1.4 }} role="alert">
+              {error}
+            </p>
+          ) : null}
         </div>
       </section>
-      {loading ? (
+      {eventsLoading ? (
         <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Cargando eventos…</p>
       ) : events.length === 0 ? (
         <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Sin eventos próximos.</p>
