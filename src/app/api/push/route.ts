@@ -70,6 +70,14 @@ export async function POST(req: Request) {
       await webpush.sendNotification(pushSub, payload, { TTL: 86_400 });
       sent += 1;
     } catch (err) {
+      console.error("[api/push] sendNotification failed:", {
+        rowId: row.id,
+        endpoint: pushSub.endpoint,
+        statusCode: getStatusCode(err),
+        err,
+        body: err && typeof err === "object" && "body" in err ? (err as { body: unknown }).body : undefined,
+        headers: err && typeof err === "object" && "headers" in err ? (err as { headers: unknown }).headers : undefined,
+      });
       const code = getStatusCode(err);
       if (code === 410 || code === 404) {
         const { error: delErr } = await admin.from("push_subscriptions").delete().eq("id", row.id);
