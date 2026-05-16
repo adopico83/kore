@@ -18,28 +18,84 @@ const fieldStyle: CSSProperties = {
   boxSizing: "border-box",
 };
 
-/** date/time en iOS PWA: contraste y área táctil explícitos */
-const dateTimeFieldStyle: CSSProperties = {
-  width: "100%",
-  display: "block",
-  minHeight: 46,
-  color: "#e4e6ed",
+const EVENT_TYPES = ["reunion", "entrega", "excursion", "examen", "otro"] as const;
+
+const dateTimeContainerStyle: CSSProperties = {
   background: "#1c2028",
-  colorScheme: "dark",
   border: "1px solid rgba(255,255,255,0.14)",
   borderRadius: 10,
-  padding: "11px 12px",
-  fontSize: 16,
-  outline: "none",
+  padding: "8px 12px",
   boxSizing: "border-box",
 };
 
-const EVENT_TYPES = ["reunion", "entrega", "excursion", "examen", "otro"] as const;
+const dateTimeInputStyle: CSSProperties = {
+  width: "100%",
+  display: "block",
+  marginTop: 6,
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: "#e4e6ed",
+  colorScheme: "dark",
+  fontSize: 16,
+  opacity: 1,
+  outline: "none",
+  boxSizing: "border-box",
+  minHeight: 28,
+};
 
 function formatDateLabel(date: string): string {
   const parts = date.slice(0, 10).split("-");
   if (parts.length < 3) return date;
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+function formatTimeLabel(time: string): string {
+  const t = time.trim();
+  if (!t) return "";
+  return t.slice(0, 5);
+}
+
+type DateTimeFieldProps = {
+  kind: "date" | "time";
+  value: string;
+  onChange: (value: string) => void;
+  min?: string;
+  ariaLabel: string;
+};
+
+/** iOS PWA: valor visible en label; input nativo conserva el picker. */
+function DateTimeField({ kind, value, onChange, min, ariaLabel }: DateTimeFieldProps) {
+  const hasValue = value.trim().length > 0;
+  const displayText = hasValue
+    ? kind === "date"
+      ? formatDateLabel(value)
+      : formatTimeLabel(value)
+    : "Toca para seleccionar";
+
+  return (
+    <label style={{ ...dateTimeContainerStyle, display: "block", cursor: "pointer" }}>
+      <span
+        style={{
+          display: "block",
+          fontSize: 14,
+          fontWeight: hasValue ? 600 : 400,
+          color: hasValue ? "#e4e6ed" : "rgba(228,230,237,0.45)",
+          lineHeight: 1.35,
+        }}
+      >
+        {displayText}
+      </span>
+      <input
+        type={kind}
+        value={value}
+        min={kind === "date" ? min : undefined}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={ariaLabel}
+        style={dateTimeInputStyle}
+      />
+    </label>
+  );
 }
 
 function errorMessage(err: unknown): string {
@@ -122,14 +178,8 @@ export function SchoolDomainPanel() {
         <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Nuevo evento escolar</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <input placeholder="Título" value={title} onChange={(e) => setTitle(e.target.value)} style={fieldStyle} />
-          <input
-            type="date"
-            value={date}
-            min={today}
-            onChange={(e) => setDate(e.target.value)}
-            style={dateTimeFieldStyle}
-          />
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={dateTimeFieldStyle} />
+          <DateTimeField kind="date" value={date} min={today} onChange={setDate} ariaLabel="Fecha del evento" />
+          <DateTimeField kind="time" value={time} onChange={setTime} ariaLabel="Hora del evento (opcional)" />
           <select value={type} onChange={(e) => setType(e.target.value as (typeof EVENT_TYPES)[number])} style={fieldStyle}>
             {EVENT_TYPES.map((t) => (
               <option key={t} value={t}>
