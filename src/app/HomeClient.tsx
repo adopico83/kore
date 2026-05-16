@@ -56,7 +56,7 @@ import { getPendingCleaningTasks } from "@/lib/actions/cleaning";
 import { getWeeklyMenu } from "@/lib/actions/menu";
 import { getSchoolEvents } from "@/lib/actions/school";
 import { getSleepSessions } from "@/lib/actions/sleep";
-import { subscribeToNotificationsAction } from "@/lib/actions/push";
+import { subscribeToNotificationsAction, unsubscribeFromNotificationsAction } from "@/lib/actions/push";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
 import { getFamilyContext, resolvePartnerProfile, shouldShowPartnerInviteWidget } from "@/lib/family-utils";
@@ -628,6 +628,24 @@ export function HomeClient({
     }
   }, [pushSupported, safeInitialProfiles.length]);
 
+  const handleResetPush = useCallback(async () => {
+    if (!pushSupported) return;
+    setPushBusy(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await sub.unsubscribe();
+      }
+      await unsubscribeFromNotificationsAction();
+      setPushNotificationsActive(false);
+    } catch (err) {
+      console.error("[HomeClient] handleResetPush failed:", err);
+    } finally {
+      setPushBusy(false);
+    }
+  }, [pushSupported]);
+
   const corchoPartner = useMemo(
     () => resolvePartnerProfile(familyContext.adults, currentUserId),
     [familyContext.adults, currentUserId],
@@ -1181,28 +1199,55 @@ export function HomeClient({
           ) : null}
         </div>
         <div style={{ display: "flex", alignItems: "center", flexShrink: 0, position: "relative", gap: 8 }}>
-          {pushSupported && safeInitialProfiles.length > 0 && !pushNotificationsActive ? (
-            <button
-              type="button"
-              onClick={() => void handlePushToggle()}
-              disabled={pushBusy}
-              aria-label="Activar notificaciones push"
-              title="Activar/desactivar notificaciones push"
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: C.muted,
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 8,
-                padding: "6px 9px",
-                cursor: pushBusy ? "wait" : "pointer",
-                whiteSpace: "nowrap",
-                opacity: pushBusy ? 0.65 : 1,
-              }}
-            >
-              🔔 Notificaciones
-            </button>
+          {pushSupported && safeInitialProfiles.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+              {!pushNotificationsActive ? (
+                <button
+                  type="button"
+                  onClick={() => void handlePushToggle()}
+                  disabled={pushBusy}
+                  aria-label="Activar notificaciones push"
+                  title="Activar notificaciones push"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: C.muted,
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 8,
+                    padding: "6px 9px",
+                    cursor: pushBusy ? "wait" : "pointer",
+                    whiteSpace: "nowrap",
+                    opacity: pushBusy ? 0.65 : 1,
+                  }}
+                >
+                  🔔 Notificaciones
+                </button>
+              ) : null}
+              {pushNotificationsActive ? (
+                <button
+                  type="button"
+                  onClick={() => void handleResetPush()}
+                  disabled={pushBusy}
+                  aria-label="Reactivar notificaciones push (debug)"
+                  title="Desuscribir y volver a activar (temporal debug)"
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    color: C.muted,
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px dashed rgba(255,255,255,0.15)",
+                    borderRadius: 6,
+                    padding: "4px 7px",
+                    cursor: pushBusy ? "wait" : "pointer",
+                    whiteSpace: "nowrap",
+                    opacity: pushBusy ? 0.65 : 1,
+                  }}
+                >
+                  🔄 Reactivar
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {familyContext.adults.slice(0, 2).map((profile, index) => {
             const stress = stressByProfileId[profile.id] ?? 5;
