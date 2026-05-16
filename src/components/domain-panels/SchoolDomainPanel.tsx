@@ -20,13 +20,18 @@ const fieldStyle: CSSProperties = {
 
 /** date/time en iOS PWA: contraste y área táctil explícitos */
 const dateTimeFieldStyle: CSSProperties = {
-  ...fieldStyle,
   width: "100%",
   display: "block",
-  minHeight: 44,
+  minHeight: 46,
   color: "#e4e6ed",
-  backgroundColor: "rgba(255,255,255,0.05)",
+  background: "#1c2028",
   colorScheme: "dark",
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 10,
+  padding: "11px 12px",
+  fontSize: 16,
+  outline: "none",
+  boxSizing: "border-box",
 };
 
 const EVENT_TYPES = ["reunion", "entrega", "excursion", "examen", "otro"] as const;
