@@ -27,13 +27,15 @@ export async function POST(req: Request) {
 
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const subject = process.env.VAPID_SUBJECT ?? "mailto:kore@localhost";
-
   if (!publicKey || !privateKey) {
     return NextResponse.json({ error: "VAPID no configurado" }, { status: 500 });
   }
 
-  webpush.setVapidDetails(subject, publicKey, privateKey);
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT ?? "https://kore-kappa-eight.vercel.app",
+    publicKey,
+    privateKey,
+  );
 
   let json: PushBody;
   try {
