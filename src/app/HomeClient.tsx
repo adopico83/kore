@@ -621,8 +621,8 @@ export function HomeClient({
       const deviceType = /Mobile|Android|iPhone/i.test(navigator.userAgent) ? "mobile" : "desktop";
       await subscribeToNotificationsAction({ endpoint, keys: { p256dh, auth } }, deviceType);
       setPushNotificationsActive(true);
-    } catch {
-      /* sin toast: UX silenciosa */
+    } catch (err) {
+      console.error("[HomeClient] handlePushToggle failed:", err);
     } finally {
       setPushBusy(false);
     }

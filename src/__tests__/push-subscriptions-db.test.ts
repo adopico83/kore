@@ -42,12 +42,18 @@ describe("push_subscriptions kore-db", () => {
       }
       return { insert };
     });
-    mockGetBrowserClient.mockReturnValue({ from });
+    const client = { from };
 
-    const row = await saveSubscription("u1", FAMILY_ID, {
-      endpoint: "https://push.test/ep",
-      keys: { p256dh: "dh", auth: "au" },
-    }, "desktop");
+    const row = await saveSubscription(
+      client as never,
+      "u1",
+      FAMILY_ID,
+      {
+        endpoint: "https://push.test/ep",
+        keys: { p256dh: "dh", auth: "au" },
+      },
+      "desktop",
+    );
 
     expect(from).toHaveBeenCalledWith("push_subscriptions");
     expect(insert).toHaveBeenCalledWith(
@@ -82,10 +88,13 @@ describe("push_subscriptions kore-db", () => {
         }),
       };
     });
-    mockGetBrowserClient.mockReturnValue({ from });
+    const client = { from };
 
     await expect(
-      saveSubscription("u1", FAMILY_ID, { endpoint: "https://x", keys: { p256dh: "a", auth: "b" } }),
+      saveSubscription(client as never, "u1", FAMILY_ID, {
+        endpoint: "https://x",
+        keys: { p256dh: "a", auth: "b" },
+      }),
     ).rejects.toThrow("saveSubscription: insert fail");
   });
 

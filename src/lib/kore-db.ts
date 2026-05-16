@@ -258,6 +258,9 @@ export type KoreDatabase = {
 
 type KoreClient = SupabaseClient<KoreDatabase>;
 
+/** Cliente con sesión o service role; obligatorio para escrituras en push_subscriptions. */
+export type PushSubscriptionsClient = SupabaseClient<Database>;
+
 function db(): KoreClient {
   return getBrowserClient();
 }
@@ -1061,12 +1064,13 @@ export async function getNightRecoveryScore(
 }
 
 export async function saveSubscription(
+  client: PushSubscriptionsClient,
   profileId: string,
   familyId: string,
   subscription: PushSubscriptionJSON,
   deviceType?: string | null,
 ): Promise<PushSubscriptionRow> {
-  const { data: existing, error: selErr } = await db()
+  const { data: existing, error: selErr } = await client
     .from("push_subscriptions")
     .select("id, subscription_data")
     .eq("profile_id", profileId);
@@ -1075,7 +1079,7 @@ export async function saveSubscription(
   for (const row of existing ?? []) {
     const parsed = parseSubscriptionDataToWebPush(row.subscription_data as Json);
     if (parsed?.endpoint === subscription.endpoint) {
-      const { error: delOne } = await db().from("push_subscriptions").delete().eq("id", row.id);
+      const { error: delOne } = await client.from("push_subscriptions").delete().eq("id", row.id);
       throwDb("saveSubscription.delete", delOne);
     }
   }
@@ -1086,7 +1090,7 @@ export async function saveSubscription(
     subscription_data: subscription as unknown as Json,
     device_type: deviceType?.trim() || null,
   };
-  const { data, error } = await db().from("push_subscriptions").insert(payload).select("*").single();
+  const { data, error } = await client.from("push_subscriptions").insert(payload).select("*").single();
   throwDb("saveSubscription", error);
   return data as PushSubscriptionRow;
 }
@@ -1108,7 +1112,7 @@ export async function getSubscriptionsByFamily(
   return out;
 }
 
-export async function deleteSubscription(profileId: string): Promise<void> {
-  const { error } = await db().from("push_subscriptions").delete().eq("profile_id", profileId);
+export async function deleteSubscription(client: PushSubscriptionsClient, profileId: string): Promise<void> {
+  const { error } = await client.from("push_subscriptions").delete().eq("profile_id", profileId);
   throwDb("deleteSubscription", error);
 }
