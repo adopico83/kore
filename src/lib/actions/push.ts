@@ -17,7 +17,7 @@ export async function subscribeToNotificationsAction(
   const auth = subscription?.keys?.auth?.trim() ?? "";
 
   if (!endpoint || !p256dh || !auth) {
-    console.error("[push] Suscripción inválida (iOS/debug):", subscription);
+    console.error("[push] Intento de suscripción inválida bloqueado.");
     throw new Error("Suscripción inválida.");
   }
 
