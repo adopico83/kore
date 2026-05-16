@@ -258,8 +258,11 @@ export type KoreDatabase = {
 
 type KoreClient = SupabaseClient<KoreDatabase>;
 
-/** Cliente con sesión o service role; obligatorio para escrituras en push_subscriptions. */
-export type PushSubscriptionsClient = SupabaseClient<Database>;
+/** Cliente service role (o equivalente) para server actions / RLS bypass controlado. */
+export type KoreServerDbClient = SupabaseClient<Database>;
+
+/** @deprecated Usa KoreServerDbClient */
+export type PushSubscriptionsClient = KoreServerDbClient;
 
 function db(): KoreClient {
   return getBrowserClient();
@@ -300,7 +303,11 @@ export async function getCalendarEvents(familyId: string): Promise<CalendarEvent
   return data ?? [];
 }
 
-export async function addCalendarEvent(familyId: string, data: CalendarEventInsert): Promise<CalendarEventRow> {
+export async function addCalendarEvent(
+  client: KoreServerDbClient,
+  familyId: string,
+  data: CalendarEventInsert,
+): Promise<CalendarEventRow> {
   const row = {
     family_id: familyId,
     title: data.title,
@@ -310,13 +317,13 @@ export async function addCalendarEvent(familyId: string, data: CalendarEventInse
     ...(data.id ? { id: data.id } : {}),
     ...(data.created_at ? { created_at: data.created_at } : {}),
   };
-  const { data: created, error } = await db().from("calendar_events").insert(row).select("*").single();
+  const { data: created, error } = await client.from("calendar_events").insert(row).select("*").single();
   throwDb("addCalendarEvent", error);
   return created as CalendarEventRow;
 }
 
-export async function deleteCalendarEvent(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("calendar_events").delete().eq("family_id", familyId).eq("id", id);
+export async function deleteCalendarEvent(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("calendar_events").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteCalendarEvent", error);
 }
 
@@ -782,18 +789,19 @@ export async function clearDayMenu(familyId: string, day: string, week_start?: s
   throwDb("clearDayMenu", error);
 }
 
-export async function getSchoolEvents(familyId: string): Promise<SchoolEventRow[]> {
-  const { data, error } = await db()
+export async function getSchoolEvents(client: KoreServerDbClient, familyId: string): Promise<SchoolEventRow[]> {
+  const { data, error } = await client
     .from("school_events")
     .select("*")
     .eq("family_id", familyId)
     .order("date", { ascending: true })
     .order("time", { ascending: true });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as SchoolEventRow[];
 }
 
 export async function addSchoolEvent(
+  client: KoreServerDbClient,
   familyId: string,
   data: {
     title: string;
@@ -809,7 +817,7 @@ export async function addSchoolEvent(
   const typeLabel = data.type?.trim();
   const calendarTitle = typeLabel ? `${data.title} · ${typeLabel}` : data.title;
 
-  const calendarRow = await addCalendarEvent(familyId, {
+  const calendarRow = await addCalendarEvent(client, familyId, {
     title: calendarTitle,
     date: dateIso,
     time: timeStr,
@@ -825,22 +833,23 @@ export async function addSchoolEvent(
     description: data.description ?? null,
     calendar_event_id: calendarRow.id,
   };
-  const { data: created, error } = await db().from("school_events").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("school_events").insert(payload).select("*").single();
   throwDb("addSchoolEvent", error);
   return created as SchoolEventRow;
 }
 
-export async function getSchoolMaterials(familyId: string): Promise<SchoolMaterialRow[]> {
-  const { data, error } = await db()
+export async function getSchoolMaterials(client: KoreServerDbClient, familyId: string): Promise<SchoolMaterialRow[]> {
+  const { data, error } = await client
     .from("school_materials")
     .select("*")
     .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as SchoolMaterialRow[];
 }
 
 export async function addSchoolMaterial(
+  client: KoreServerDbClient,
   familyId: string,
   data: { item: string; urgency?: string },
 ): Promise<SchoolMaterialRow> {
@@ -850,19 +859,28 @@ export async function addSchoolMaterial(
     urgency: data.urgency ?? "media",
     completed: false,
   };
-  const { data: created, error } = await db().from("school_materials").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("school_materials").insert(payload).select("*").single();
   throwDb("addSchoolMaterial", error);
   return created as SchoolMaterialRow;
 }
 
-export async function completeSchoolMaterial(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("school_materials").update({ completed: true }).eq("family_id", familyId).eq("id", id);
+export async function completeSchoolMaterial(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client
+    .from("school_materials")
+    .update({ completed: true })
+    .eq("family_id", familyId)
+    .eq("id", id);
   throwDb("completeSchoolMaterial", error);
 }
 
-export async function deleteSchoolItem(familyId: string, id: string, type: "event" | "material"): Promise<void> {
+export async function deleteSchoolItem(
+  client: KoreServerDbClient,
+  familyId: string,
+  id: string,
+  type: "event" | "material",
+): Promise<void> {
   if (type === "event") {
-    const { data: row, error: readErr } = await db()
+    const { data: row, error: readErr } = await client
       .from("school_events")
       .select("calendar_event_id")
       .eq("family_id", familyId)
@@ -871,11 +889,11 @@ export async function deleteSchoolItem(familyId: string, id: string, type: "even
     throwDb("deleteSchoolItem.read", readErr);
     const calendarId = row?.calendar_event_id;
     if (calendarId) {
-      await deleteCalendarEvent(familyId, calendarId);
+      await deleteCalendarEvent(client, familyId, calendarId);
     }
   }
   const table = type === "event" ? "school_events" : "school_materials";
-  const { error } = await db().from(table).delete().eq("family_id", familyId).eq("id", id);
+  const { error } = await client.from(table).delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteSchoolItem", error);
 }
 
@@ -1064,7 +1082,7 @@ export async function getNightRecoveryScore(
 }
 
 export async function saveSubscription(
-  client: PushSubscriptionsClient,
+  client: KoreServerDbClient,
   profileId: string,
   familyId: string,
   subscription: PushSubscriptionJSON,
@@ -1112,7 +1130,7 @@ export async function getSubscriptionsByFamily(
   return out;
 }
 
-export async function deleteSubscription(client: PushSubscriptionsClient, profileId: string): Promise<void> {
+export async function deleteSubscription(client: KoreServerDbClient, profileId: string): Promise<void> {
   const { error } = await client.from("push_subscriptions").delete().eq("profile_id", profileId);
   throwDb("deleteSubscription", error);
 }

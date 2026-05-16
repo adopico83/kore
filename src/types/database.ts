@@ -856,6 +856,7 @@ export type Database = {
       }
       school_events: {
         Row: {
+          calendar_event_id: string | null
           created_at: string | null
           date: string
           description: string | null
@@ -866,6 +867,7 @@ export type Database = {
           type: string | null
         }
         Insert: {
+          calendar_event_id?: string | null
           created_at?: string | null
           date: string
           description?: string | null
@@ -876,6 +878,7 @@ export type Database = {
           type?: string | null
         }
         Update: {
+          calendar_event_id?: string | null
           created_at?: string | null
           date?: string
           description?: string | null
@@ -886,6 +889,13 @@ export type Database = {
           type?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "school_events_calendar_event_id_fkey"
+            columns: ["calendar_event_id"]
+            isOneToOne: false
+            referencedRelation: "calendar_events"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "school_events_family_id_fkey"
             columns: ["family_id"]

@@ -9,6 +9,7 @@ import {
   type CalendarEventInsert,
   type CalendarEventRow,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 async function requireFamilyId(): Promise<string> {
   const familyId = await getScopedFamilyId();
@@ -23,7 +24,8 @@ export async function getCalendarEvents() {
 
 export async function addCalendarEvent(data: CalendarEventInsert) {
   const familyId = await requireFamilyId();
-  return dbAddCalendarEvent(familyId, data);
+  const admin = createAdminClient();
+  return dbAddCalendarEvent(admin, familyId, data);
 }
 
 export async function updateCalendarEvent(
@@ -36,5 +38,6 @@ export async function updateCalendarEvent(
 
 export async function deleteCalendarEvent(id: string) {
   const familyId = await requireFamilyId();
-  return dbDeleteCalendarEvent(familyId, id);
+  const admin = createAdminClient();
+  return dbDeleteCalendarEvent(admin, familyId, id);
 }

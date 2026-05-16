@@ -99,6 +99,7 @@ export default async function Home() {
     );
   }
 
+  const admin = createAdminClient();
   const [
     initialProfiles,
     initialDomainsAll,
@@ -122,7 +123,7 @@ export default async function Home() {
     getPendingCleaningTasks(familyId),
     getWeeklyMenu(familyId),
     getSleepSessions(familyId, 14),
-    getSchoolEvents(familyId),
+    getSchoolEvents(admin, familyId),
   ]);
 
   const initialDomains = initialDomainsAll.filter((domain) => domain.is_active === true);

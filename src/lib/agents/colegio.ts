@@ -8,6 +8,7 @@ import {
   getSchoolEvents,
   getSchoolMaterials,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const AGENT_DESCRIPTION =
   "Experto en todo lo relacionado con el colegio de la hija. Gestiona ÚNICAMENTE excursiones, material escolar, fechas del cole, reuniones de padres, actividades extraescolares.";
@@ -94,6 +95,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     return { error: "Esta petición no es competencia del subagente de Colegio." };
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const admin = createAdminClient();
 
   switch (toolName) {
     case "add_school_event": {
@@ -101,7 +103,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const date = String(a.date ?? "").trim();
       const type = String(a.type ?? "otro");
       if (!title || !date) throw new Error("Faltan title o date en evento escolar.");
-      const ev = await addSchoolEvent(ctx.familyId, {
+      const ev = await addSchoolEvent(admin, ctx.familyId, {
         title,
         date,
         time: a.time ? String(a.time) : undefined,
@@ -112,25 +114,25 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       return { ok: true, event: ev };
     }
     case "get_school_events": {
-      const events = await getSchoolEvents(ctx.familyId);
+      const events = await getSchoolEvents(admin, ctx.familyId);
       return { ok: true, events };
     }
     case "add_school_material": {
       const item = String(a.item ?? "").trim();
       const urgency = String(a.urgency ?? "media");
       if (!item) throw new Error("Falta item en material escolar.");
-      const material = await addSchoolMaterial(ctx.familyId, { item, urgency });
+      const material = await addSchoolMaterial(admin, ctx.familyId, { item, urgency });
       return { ok: true, material };
     }
     case "get_school_materials": {
-      const materials = await getSchoolMaterials(ctx.familyId);
+      const materials = await getSchoolMaterials(admin, ctx.familyId);
       return { ok: true, materials };
     }
     case "delete_school_item": {
       const id = String(a.id ?? "").trim();
       const item_type = a.item_type as "event" | "material";
       if (!id || !item_type) throw new Error("Faltan id o item_type para borrar elemento escolar.");
-      await deleteSchoolItem(ctx.familyId, id, item_type);
+      await deleteSchoolItem(admin, ctx.familyId, id, item_type);
       return { ok: true, updated: id, item_type };
     }
     default:

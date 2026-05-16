@@ -8,6 +8,7 @@ import {
   getCalendarEvents,
   type CalendarEventInsert,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const AGENT_DESCRIPTION =
   "Experto en calendario familiar. Gestiona ÚNICAMENTE eventos, citas familiares generales, fechas importantes y recordatorios del calendario.";
@@ -207,7 +208,8 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         time,
         createdBy: row.created_by,
       });
-      const created = await addCalendarEvent(ctx.familyId, row);
+      const admin = createAdminClient();
+      const created = await addCalendarEvent(admin, ctx.familyId, row);
       console.log("[agenda] add_calendar_event output", created);
       return { ok: true, event: created };
     }
@@ -222,7 +224,8 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     case "delete_calendar_event": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await deleteCalendarEvent(ctx.familyId, id);
+      const admin = createAdminClient();
+      await deleteCalendarEvent(admin, ctx.familyId, id);
       return { ok: true, deleted: id };
     }
     case "get_upcoming_events": {

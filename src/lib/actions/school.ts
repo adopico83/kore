@@ -6,6 +6,7 @@ import {
   deleteSchoolItem as dbDeleteSchoolItem,
   getSchoolEvents as dbGetSchoolEvents,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 async function requireFamilyId(): Promise<string> {
   const familyId = await getScopedFamilyId();
@@ -15,7 +16,8 @@ async function requireFamilyId(): Promise<string> {
 
 export async function getSchoolEvents() {
   const familyId = await requireFamilyId();
-  return dbGetSchoolEvents(familyId);
+  const admin = createAdminClient();
+  return dbGetSchoolEvents(admin, familyId);
 }
 
 export async function addSchoolEvent(data: {
@@ -27,7 +29,8 @@ export async function addSchoolEvent(data: {
 }) {
   const familyId = await requireFamilyId();
   const userId = await getScopedUserId();
-  return dbAddSchoolEvent(familyId, {
+  const admin = createAdminClient();
+  return dbAddSchoolEvent(admin, familyId, {
     ...data,
     created_by: userId,
   });
@@ -35,5 +38,6 @@ export async function addSchoolEvent(data: {
 
 export async function deleteSchoolEvent(id: string) {
   const familyId = await requireFamilyId();
-  return dbDeleteSchoolItem(familyId, id, "event");
+  const admin = createAdminClient();
+  return dbDeleteSchoolItem(admin, familyId, id, "event");
 }
