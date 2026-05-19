@@ -25,6 +25,7 @@ export async function addSleepSession(data: {
   sleep_start: string;
   sleep_end: string;
   wake_count?: number;
+  hours?: number | null;
   notes?: string | null;
 }) {
   const familyId = await requireFamilyId();

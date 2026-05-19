@@ -964,6 +964,21 @@ export function sleepSessionDurationHours(sleepStart: string, sleepEnd: string):
   return Math.round((ms / 3_600_000) * 10) / 10;
 }
 
+/** Activa cuando exista `sleep_sessions.hours` en Supabase y en `database.ts`. */
+const SLEEP_SESSIONS_HAS_HOURS_COLUMN = false;
+
+function normalizeSleepHours(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.round(Math.min(24, Math.max(0, value)) * 2) / 2;
+}
+
+function buildSleepSessionNotes(userNotes: string | null, hours: number | null): string | null {
+  const parts: string[] = [];
+  if (hours != null) parts.push(`Horas: ${hours}`);
+  if (userNotes) parts.push(userNotes);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 export async function addSleepSession(
   client: KoreServerDbClient,
   familyId: string,
@@ -972,16 +987,20 @@ export async function addSleepSession(
     sleep_start: string;
     sleep_end: string;
     wake_count?: number;
+    hours?: number | null;
     notes?: string | null;
   },
 ): Promise<SleepSessionRow> {
+  const hours = normalizeSleepHours(data.hours);
+  const userNotes = data.notes?.trim() ? data.notes.trim() : null;
   const payload = {
     family_id: familyId,
     profile_id: data.profile_id,
     sleep_start: data.sleep_start,
     sleep_end: data.sleep_end,
     wake_count: Math.max(0, Math.round(data.wake_count ?? 0)),
-    notes: data.notes?.trim() ? data.notes.trim() : null,
+    notes: SLEEP_SESSIONS_HAS_HOURS_COLUMN ? userNotes : buildSleepSessionNotes(userNotes, hours),
+    ...(SLEEP_SESSIONS_HAS_HOURS_COLUMN && hours != null ? { hours } : {}),
   };
   const { data: created, error } = await client.from("sleep_sessions").insert(payload).select("*").single();
   throwDb("addSleepSession", error);

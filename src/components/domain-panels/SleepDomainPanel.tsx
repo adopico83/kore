@@ -41,6 +41,7 @@ export function SleepDomainPanel({ profiles }: Props) {
   const [sleepStart, setSleepStart] = useState("");
   const [sleepEnd, setSleepEnd] = useState("");
   const [wakeCount, setWakeCount] = useState(0);
+  const [hoursSlept, setHoursSlept] = useState("");
   const [notes, setNotes] = useState("");
 
   const reload = useCallback(async () => {
@@ -58,17 +59,25 @@ export function SleepDomainPanel({ profiles }: Props) {
 
   const onAdd = async () => {
     if (!profileId || !sleepStart || !sleepEnd) return;
+    const hoursTrim = hoursSlept.trim();
+    const hours =
+      hoursTrim !== "" && Number.isFinite(Number(hoursTrim))
+        ? Math.min(24, Math.max(0, Number(hoursTrim)))
+        : undefined;
+
     await addSleepSession({
       profile_id: profileId,
       sleep_start: fromDatetimeLocalValue(sleepStart),
       sleep_end: fromDatetimeLocalValue(sleepEnd),
       wake_count: wakeCount,
+      hours,
       notes: notes.trim() || null,
     });
     emitKoreUpdate(["sleep_sessions"]);
     setSleepStart("");
     setSleepEnd("");
     setWakeCount(0);
+    setHoursSlept("");
     setNotes("");
     await reload();
   };
@@ -109,6 +118,16 @@ export function SleepDomainPanel({ profiles }: Props) {
             value={wakeCount}
             onChange={(e) => setWakeCount(Number(e.target.value) || 0)}
             placeholder="Despertares"
+            style={fieldStyle}
+          />
+          <input
+            type="number"
+            min={0}
+            max={24}
+            step={0.5}
+            value={hoursSlept}
+            onChange={(e) => setHoursSlept(e.target.value)}
+            placeholder="Horas dormidas (opcional)"
             style={fieldStyle}
           />
           <input placeholder="Notas (opcional)" value={notes} onChange={(e) => setNotes(e.target.value)} style={fieldStyle} />

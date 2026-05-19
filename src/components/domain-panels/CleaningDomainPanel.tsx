@@ -34,6 +34,10 @@ function formatDueLabel(due: string | null): string {
   return `${parts[2]}/${parts[1]}`;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "No se pudo añadir la tarea.";
+}
+
 function TaskList({
   title,
   empty,
@@ -108,20 +112,22 @@ export function CleaningDomainPanel({ profiles }: Props) {
   const adults = profiles.filter((p) => p.role !== "child");
   const [due, setDue] = useState<CleaningTaskRow[]>([]);
   const [upcoming, setUpcoming] = useState<CleaningTaskRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [zone, setZone] = useState("");
   const [task, setTask] = useState("");
   const [frequency, setFrequency] = useState<"diaria" | "semanal" | "mensual">("semanal");
   const [assignedTo, setAssignedTo] = useState(adults[0]?.id ?? "");
 
   const reload = useCallback(async () => {
-    setLoading(true);
+    setListLoading(true);
     try {
       const [d, u] = await Promise.all([getPendingCleaningTasks(), getUpcomingCleaningTasks(7)]);
       setDue(d);
       setUpcoming(u);
     } finally {
-      setLoading(false);
+      setListLoading(false);
     }
   }, []);
 
@@ -130,17 +136,33 @@ export function CleaningDomainPanel({ profiles }: Props) {
   }, [reload]);
 
   const onAdd = async () => {
-    if (!zone.trim() || !task.trim()) return;
-    await addCleaningTask({
-      zone: zone.trim(),
-      task: task.trim(),
-      frequency,
-      assigned_to: assignedTo || undefined,
-    });
-    emitKoreUpdate(["cleaning_tasks"]);
-    setZone("");
-    setTask("");
-    await reload();
+    setError(null);
+    if (!zone.trim()) {
+      setError("La zona es obligatoria.");
+      return;
+    }
+    if (!task.trim()) {
+      setError("La tarea es obligatoria.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await addCleaningTask({
+        zone: zone.trim(),
+        task: task.trim(),
+        frequency,
+        assigned_to: assignedTo || undefined,
+      });
+      emitKoreUpdate(["cleaning_tasks"]);
+      setZone("");
+      setTask("");
+      await reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onComplete = async (id: string) => {
@@ -173,6 +195,7 @@ export function CleaningDomainPanel({ profiles }: Props) {
           <button
             type="button"
             onClick={() => void onAdd()}
+            disabled={loading}
             style={{
               border: "none",
               borderRadius: 8,
@@ -180,15 +203,21 @@ export function CleaningDomainPanel({ profiles }: Props) {
               color: "#0a1a14",
               padding: "10px 12px",
               fontWeight: 700,
-              cursor: "pointer",
+              cursor: loading ? "wait" : "pointer",
+              opacity: loading ? 0.7 : 1,
             }}
           >
-            Añadir tarea
+            {loading ? "Guardando…" : "Añadir tarea"}
           </button>
+          {error ? (
+            <p style={{ margin: 0, fontSize: 12, color: "#E05555", lineHeight: 1.4 }} role="alert">
+              {error}
+            </p>
+          ) : null}
         </div>
       </section>
 
-      {loading ? (
+      {listLoading ? (
         <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Cargando tareas…</p>
       ) : (
         <>
