@@ -9,6 +9,7 @@ import {
   getPendingCleaningTasks,
   getUpcomingCleaningTasks,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const AGENT_DESCRIPTION =
   "Experto en gestión de la limpieza del hogar. Gestiona ÚNICAMENTE tareas de limpieza, frecuencias, zonas del hogar y responsables.";
@@ -86,6 +87,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const { familyId, profiles } = ctx;
+  const admin = createAdminClient();
 
   switch (toolName) {
     case "add_cleaning_task": {
@@ -95,26 +97,26 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const assignedRaw = String(a.assigned_to ?? "");
       const assigned_to = resolveProfileIdFromAgentToken(assignedRaw, profiles) ?? undefined;
       if (!zone || !task) throw new Error("Faltan zone o task para limpieza.");
-      const created = await addCleaningTask(familyId, { zone, task, frequency, assigned_to });
+      const created = await addCleaningTask(admin, familyId, { zone, task, frequency, assigned_to });
       return { ok: true, task: created };
     }
     case "get_cleaning_tasks": {
-      const tasks = await getCleaningTasks(familyId);
+      const tasks = await getCleaningTasks(admin, familyId);
       return { ok: true, tasks };
     }
     case "complete_cleaning_task": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para completar tarea de limpieza.");
-      const updated = await completeCleaningTask(familyId, id);
+      const updated = await completeCleaningTask(admin, familyId, id);
       return { ok: true, task: updated };
     }
     case "get_pending_cleaning": {
-      const pending = await getPendingCleaningTasks(familyId);
+      const pending = await getPendingCleaningTasks(admin, familyId);
       return { ok: true, pending };
     }
     case "get_upcoming_cleaning": {
       const days = Math.min(30, Math.max(1, Number(a.days) || 7));
-      const upcoming = await getUpcomingCleaningTasks(familyId, days);
+      const upcoming = await getUpcomingCleaningTasks(admin, familyId, days);
       return { ok: true, days, upcoming };
     }
     default:

@@ -646,17 +646,18 @@ export async function clearCompletedItems(familyId: string): Promise<void> {
   throwDb("clearCompletedItems", error);
 }
 
-export async function getCleaningTasks(familyId: string): Promise<CleaningTaskRow[]> {
-  const { data, error } = await db()
+export async function getCleaningTasks(client: KoreServerDbClient, familyId: string): Promise<CleaningTaskRow[]> {
+  const { data, error } = await client
     .from("cleaning_tasks")
     .select("*")
     .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as CleaningTaskRow[];
 }
 
 export async function addCleaningTask(
+  client: KoreServerDbClient,
   familyId: string,
   data: {
     zone: string;
@@ -676,13 +677,17 @@ export async function addCleaningTask(
     last_completed_at: null,
     next_due_at: computeInitialNextDueDate(now, data.frequency ?? "semanal"),
   };
-  const { data: created, error } = await db().from("cleaning_tasks").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("cleaning_tasks").insert(payload).select("*").single();
   throwDb("addCleaningTask", error);
   return created as CleaningTaskRow;
 }
 
-export async function completeCleaningTask(familyId: string, id: string): Promise<CleaningTaskRow> {
-  const { data: existing, error: readErr } = await db()
+export async function completeCleaningTask(
+  client: KoreServerDbClient,
+  familyId: string,
+  id: string,
+): Promise<CleaningTaskRow> {
+  const { data: existing, error: readErr } = await client
     .from("cleaning_tasks")
     .select("*")
     .eq("family_id", familyId)
@@ -693,7 +698,7 @@ export async function completeCleaningTask(familyId: string, id: string): Promis
 
   const now = new Date();
   const nextDue = formatDateIso(computeNextDueDate(now, existing.frequency));
-  const { data: updated, error } = await db()
+  const { data: updated, error } = await client
     .from("cleaning_tasks")
     .update({
       last_completed_at: now.toISOString(),
@@ -709,8 +714,12 @@ export async function completeCleaningTask(familyId: string, id: string): Promis
 }
 
 /** Tareas con vencimiento hoy o atrasadas (recurrencia). */
-export async function getPendingCleaningTasks(familyId: string, asOf = todayIsoDate()): Promise<CleaningTaskRow[]> {
-  const { data, error } = await db()
+export async function getPendingCleaningTasks(
+  client: KoreServerDbClient,
+  familyId: string,
+  asOf = todayIsoDate(),
+): Promise<CleaningTaskRow[]> {
+  const { data, error } = await client
     .from("cleaning_tasks")
     .select("*")
     .eq("family_id", familyId)
@@ -718,18 +727,19 @@ export async function getPendingCleaningTasks(familyId: string, asOf = todayIsoD
     .lte("next_due_at", asOf)
     .order("next_due_at", { ascending: true });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as CleaningTaskRow[];
 }
 
 /** Próximas tareas (después de hoy, dentro de N días). */
 export async function getUpcomingCleaningTasks(
+  client: KoreServerDbClient,
   familyId: string,
   withinDays = 7,
   asOf = todayIsoDate(),
 ): Promise<CleaningTaskRow[]> {
   const endIso = formatDateIso(addDays(new Date(`${asOf}T12:00:00`), withinDays));
 
-  const { data, error } = await db()
+  const { data, error } = await client
     .from("cleaning_tasks")
     .select("*")
     .eq("family_id", familyId)
@@ -738,7 +748,7 @@ export async function getUpcomingCleaningTasks(
     .lte("next_due_at", endIso)
     .order("next_due_at", { ascending: true });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as CleaningTaskRow[];
 }
 
 function currentWeekStartIso(now = new Date()): string {
@@ -955,6 +965,7 @@ export function sleepSessionDurationHours(sleepStart: string, sleepEnd: string):
 }
 
 export async function addSleepSession(
+  client: KoreServerDbClient,
   familyId: string,
   data: {
     profile_id: string;
@@ -972,25 +983,29 @@ export async function addSleepSession(
     wake_count: Math.max(0, Math.round(data.wake_count ?? 0)),
     notes: data.notes?.trim() ? data.notes.trim() : null,
   };
-  const { data: created, error } = await db().from("sleep_sessions").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("sleep_sessions").insert(payload).select("*").single();
   throwDb("addSleepSession", error);
   return created as SleepSessionRow;
 }
 
-export async function getSleepSessions(familyId: string, days = 7): Promise<SleepSessionRow[]> {
+export async function getSleepSessions(
+  client: KoreServerDbClient,
+  familyId: string,
+  days = 7,
+): Promise<SleepSessionRow[]> {
   const cutoff = new Date(Date.now() - Math.max(1, days) * 24 * 3600 * 1000).toISOString();
-  const { data, error } = await db()
+  const { data, error } = await client
     .from("sleep_sessions")
     .select("*")
     .eq("family_id", familyId)
     .gte("sleep_start", cutoff)
     .order("sleep_start", { ascending: false });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as SleepSessionRow[];
 }
 
-export async function deleteSleepSession(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("sleep_sessions").delete().eq("family_id", familyId).eq("id", id);
+export async function deleteSleepSession(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("sleep_sessions").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteSleepSession", error);
 }
 
@@ -1002,10 +1017,11 @@ export type SleepSummaryByPerson = {
 };
 
 export async function getSleepSummaryFromSessions(
+  client: KoreServerDbClient,
   familyId: string,
   days = 7,
 ): Promise<{ days: number; sessions: SleepSessionRow[]; by_person: SleepSummaryByPerson[] }> {
-  const sessions = await getSleepSessions(familyId, days);
+  const sessions = await getSleepSessions(client, familyId, days);
   const byPerson = new Map<string, { hours: number[]; wakes: number }>();
   for (const s of sessions) {
     const bucket = byPerson.get(s.profile_id) ?? { hours: [], wakes: 0 };

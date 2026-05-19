@@ -12,6 +12,7 @@ import {
   getShoppingItems,
   type Profile,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -302,11 +303,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const admin = createAdminClient();
     const [memories, profiles, shoppingItems, pendingCleaningTasks, currentUserId] = await Promise.all([
       getAgentMemory(familyId),
       getProfiles(familyId),
       getShoppingItems(familyId),
-      getPendingCleaningTasks(familyId),
+      getPendingCleaningTasks(admin, familyId),
       getScopedUserId(),
     ]);
     const agentCtx: AgentExecutionContext = { familyId, profiles, currentUserId };

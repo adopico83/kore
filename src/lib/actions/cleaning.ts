@@ -8,6 +8,7 @@ import {
   getPendingCleaningTasks as dbGetPendingCleaningTasks,
   getUpcomingCleaningTasks as dbGetUpcomingCleaningTasks,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 async function requireFamilyId(): Promise<string> {
   const familyId = await getScopedFamilyId();
@@ -17,7 +18,8 @@ async function requireFamilyId(): Promise<string> {
 
 export async function getCleaningTasks() {
   const familyId = await requireFamilyId();
-  return dbGetCleaningTasks(familyId);
+  const admin = createAdminClient();
+  return dbGetCleaningTasks(admin, familyId);
 }
 
 export async function addCleaningTask(data: {
@@ -27,20 +29,24 @@ export async function addCleaningTask(data: {
   assigned_to?: string;
 }) {
   const familyId = await requireFamilyId();
-  return dbAddCleaningTask(familyId, data);
+  const admin = createAdminClient();
+  return dbAddCleaningTask(admin, familyId, data);
 }
 
 export async function completeCleaningTask(id: string) {
   const familyId = await requireFamilyId();
-  return dbCompleteCleaningTask(familyId, id);
+  const admin = createAdminClient();
+  return dbCompleteCleaningTask(admin, familyId, id);
 }
 
 export async function getPendingCleaningTasks() {
   const familyId = await requireFamilyId();
-  return dbGetPendingCleaningTasks(familyId);
+  const admin = createAdminClient();
+  return dbGetPendingCleaningTasks(admin, familyId);
 }
 
 export async function getUpcomingCleaningTasks(withinDays = 7) {
   const familyId = await requireFamilyId();
-  return dbGetUpcomingCleaningTasks(familyId, withinDays);
+  const admin = createAdminClient();
+  return dbGetUpcomingCleaningTasks(admin, familyId, withinDays);
 }

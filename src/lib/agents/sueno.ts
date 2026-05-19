@@ -8,6 +8,7 @@ import {
   getSleepSessions,
   getSleepSummaryFromSessions,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const AGENT_DESCRIPTION =
   "Experto en gestión del sueño y rutinas nocturnas familiares. Gestiona ÚNICAMENTE sesiones de sueño (inicio, fin, despertares) por persona.";
@@ -85,6 +86,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const { familyId, profiles } = ctx;
+  const admin = createAdminClient();
 
   switch (toolName) {
     case "log_sleep_session": {
@@ -92,7 +94,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const sleep_start = String(a.sleep_start ?? "").trim();
       const sleep_end = String(a.sleep_end ?? "").trim();
       if (!sleep_start || !sleep_end) throw new Error("Faltan sleep_start o sleep_end.");
-      const row = await addSleepSession(familyId, {
+      const row = await addSleepSession(admin, familyId, {
         profile_id,
         sleep_start,
         sleep_end,
@@ -103,12 +105,12 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     }
     case "get_sleep_sessions": {
       const days = Math.min(30, Math.max(1, Number(a.days) || 7));
-      const sessions = await getSleepSessions(familyId, days);
+      const sessions = await getSleepSessions(admin, familyId, days);
       return { ok: true, days, sessions };
     }
     case "get_sleep_summary": {
       const days = Math.min(30, Math.max(1, Number(a.days) || 7));
-      const summary = await getSleepSummaryFromSessions(familyId, days);
+      const summary = await getSleepSummaryFromSessions(admin, familyId, days);
       return { ok: true, ...summary };
     }
     case "get_night_recovery_score": {

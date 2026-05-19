@@ -150,6 +150,8 @@ export type Database = {
           family_id: string | null
           frequency: string | null
           id: string
+          last_completed_at: string | null
+          next_due_at: string | null
           task: string
           zone: string
         }
@@ -160,6 +162,8 @@ export type Database = {
           family_id?: string | null
           frequency?: string | null
           id?: string
+          last_completed_at?: string | null
+          next_due_at?: string | null
           task: string
           zone: string
         }
@@ -170,6 +174,8 @@ export type Database = {
           family_id?: string | null
           frequency?: string | null
           id?: string
+          last_completed_at?: string | null
+          next_due_at?: string | null
           task?: string
           zone?: string
         }
@@ -987,6 +993,54 @@ export type Database = {
             columns: ["family_id"]
             isOneToOne: false
             referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sleep_sessions: {
+        Row: {
+          created_at: string | null
+          family_id: string | null
+          id: string
+          notes: string | null
+          profile_id: string | null
+          sleep_end: string
+          sleep_start: string
+          wake_count: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          family_id?: string | null
+          id?: string
+          notes?: string | null
+          profile_id?: string | null
+          sleep_end: string
+          sleep_start: string
+          wake_count?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          family_id?: string | null
+          id?: string
+          notes?: string | null
+          profile_id?: string | null
+          sleep_end?: string
+          sleep_start?: string
+          wake_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sleep_sessions_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sleep_sessions_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]

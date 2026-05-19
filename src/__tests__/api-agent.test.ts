@@ -13,6 +13,12 @@ const mockExecuteTool = vi.fn();
 const mockApplyGuardrails = vi.fn((plan) => plan);
 const mockCreate = vi.fn();
 
+const mockAdminClient = { from: vi.fn() };
+
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: vi.fn(() => mockAdminClient),
+}));
+
 vi.mock("@/lib/kore-db", () => ({
   getAgentMemory: mockGetAgentMemory,
   getProfiles: vi.fn().mockResolvedValue([]),

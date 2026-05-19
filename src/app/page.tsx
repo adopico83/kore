@@ -120,9 +120,9 @@ export default async function Home() {
     getHealthRecords(familyId),
     getKoreNotes(familyId),
     getShoppingItems(familyId),
-    getPendingCleaningTasks(familyId),
+    getPendingCleaningTasks(admin, familyId),
     getWeeklyMenu(familyId),
-    getSleepSessions(familyId, 14),
+    getSleepSessions(admin, familyId, 14),
     getSchoolEvents(admin, familyId),
   ]);
 

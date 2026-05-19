@@ -6,6 +6,7 @@ import {
   deleteSleepSession as dbDeleteSleepSession,
   getSleepSessions as dbGetSleepSessions,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 async function requireFamilyId(): Promise<string> {
   const familyId = await getScopedFamilyId();
@@ -15,7 +16,8 @@ async function requireFamilyId(): Promise<string> {
 
 export async function getSleepSessions(days = 14) {
   const familyId = await requireFamilyId();
-  return dbGetSleepSessions(familyId, days);
+  const admin = createAdminClient();
+  return dbGetSleepSessions(admin, familyId, days);
 }
 
 export async function addSleepSession(data: {
@@ -26,10 +28,12 @@ export async function addSleepSession(data: {
   notes?: string | null;
 }) {
   const familyId = await requireFamilyId();
-  return dbAddSleepSession(familyId, data);
+  const admin = createAdminClient();
+  return dbAddSleepSession(admin, familyId, data);
 }
 
 export async function deleteSleepSession(id: string) {
   const familyId = await requireFamilyId();
-  return dbDeleteSleepSession(familyId, id);
+  const admin = createAdminClient();
+  return dbDeleteSleepSession(admin, familyId, id);
 }

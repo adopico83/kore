@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { addSleepSession, deleteSleepSession, getSleepSessions } from "@/lib/actions/sleep";
 import { sleepSessionDurationHours, type Profile, type SleepSessionRow } from "@/lib/kore-db";
+import { DateTimeLocalField } from "./DateTimeField";
 
 const fieldStyle: CSSProperties = {
   width: "100%",
@@ -90,14 +91,18 @@ export function SleepDomainPanel({ profiles }: Props) {
               </option>
             ))}
           </select>
-          <label style={{ fontSize: 11, color: "rgba(228,230,237,0.55)" }}>
-            Inicio
-            <input type="datetime-local" value={sleepStart} onChange={(e) => setSleepStart(e.target.value)} style={{ ...fieldStyle, marginTop: 4 }} />
-          </label>
-          <label style={{ fontSize: 11, color: "rgba(228,230,237,0.55)" }}>
-            Fin
-            <input type="datetime-local" value={sleepEnd} onChange={(e) => setSleepEnd(e.target.value)} style={{ ...fieldStyle, marginTop: 4 }} />
-          </label>
+          <DateTimeLocalField
+            caption="Inicio"
+            value={sleepStart}
+            onChange={setSleepStart}
+            ariaLabel="Inicio de la sesión de sueño"
+          />
+          <DateTimeLocalField
+            caption="Fin"
+            value={sleepEnd}
+            onChange={setSleepEnd}
+            ariaLabel="Fin de la sesión de sueño"
+          />
           <input
             type="number"
             min={0}
