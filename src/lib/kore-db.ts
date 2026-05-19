@@ -993,14 +993,18 @@ export async function addSleepSession(
 ): Promise<SleepSessionRow> {
   const hours = normalizeSleepHours(data.hours);
   const userNotes = data.notes?.trim() ? data.notes.trim() : null;
+
+  if (SLEEP_SESSIONS_HAS_HOURS_COLUMN) {
+    throw new Error("sleep_sessions.hours: añade la columna en Supabase y en database.ts antes de activar el flag.");
+  }
+
   const payload = {
     family_id: familyId,
     profile_id: data.profile_id,
     sleep_start: data.sleep_start,
     sleep_end: data.sleep_end,
     wake_count: Math.max(0, Math.round(data.wake_count ?? 0)),
-    notes: SLEEP_SESSIONS_HAS_HOURS_COLUMN ? userNotes : buildSleepSessionNotes(userNotes, hours),
-    ...(SLEEP_SESSIONS_HAS_HOURS_COLUMN && hours != null ? { hours } : {}),
+    notes: buildSleepSessionNotes(userNotes, hours),
   };
   const { data: created, error } = await client.from("sleep_sessions").insert(payload).select("*").single();
   throwDb("addSleepSession", error);
