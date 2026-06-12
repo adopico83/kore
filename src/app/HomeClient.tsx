@@ -14,6 +14,7 @@ import {
   type CalendarEventUpdateDraft,
   type KoreAgendaEvent,
 } from "@/components/CalendarModal/CalendarModal";
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -61,6 +62,7 @@ import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
 import { getFamilyContext, resolvePartnerProfile, shouldShowPartnerInviteWidget } from "@/lib/family-utils";
 import { BASE_DOMAINS } from "@/lib/domains-catalog";
+import { getBrowserClient } from "@/lib/supabase/client";
 
 function avatarStressBorder(level: number): string {
   if (level >= 8) return "#10b981";
@@ -541,6 +543,7 @@ export function HomeClient({
   /** Solo true con permiso explícito "granted" y suscripción push; el botón se oculta cuando es true. */
   const [pushNotificationsActive, setPushNotificationsActive] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [showAdminLink, setShowAdminLink] = useState(false);
 
   const familyContext = useMemo(
     () => getFamilyContext(safeInitialProfiles, currentUserId),
@@ -576,6 +579,26 @@ export function HomeClient({
         "PushManager" in window &&
         "Notification" in window,
     );
+  }, []);
+
+  useEffect(() => {
+    const allowlist = (process.env.NEXT_PUBLIC_KORE_ADMIN_EMAIL ?? "").trim().toLowerCase();
+    if (!allowlist) {
+      setShowAdminLink(false);
+      return;
+    }
+    void (async () => {
+      try {
+        const supabase = getBrowserClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const email = (user?.email ?? "").trim().toLowerCase();
+        setShowAdminLink(Boolean(email && email === allowlist));
+      } catch {
+        setShowAdminLink(false);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -1248,6 +1271,28 @@ export function HomeClient({
                 </button>
               ) : null}
             </div>
+          ) : null}
+          {showAdminLink ? (
+            <Link
+              href="/admin"
+              aria-label="Panel de administración"
+              title="Admin"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                color: "rgba(228,230,237,0.35)",
+                fontSize: 14,
+                lineHeight: 1,
+                textDecoration: "none",
+                flexShrink: 0,
+              }}
+            >
+              ⚙️
+            </Link>
           ) : null}
           {familyContext.adults.slice(0, 2).map((profile, index) => {
             const stress = stressByProfileId[profile.id] ?? 5;
