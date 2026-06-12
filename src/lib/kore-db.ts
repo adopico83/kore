@@ -730,6 +730,93 @@ export async function getPendingCleaningTasks(
   return (data ?? []) as CleaningTaskRow[];
 }
 
+/** IDs de familias con al menos una suscripción push activa. */
+export async function listFamilyIdsWithPushSubscriptions(client: KoreServerDbClient): Promise<string[]> {
+  const { data, error } = await client.from("push_subscriptions").select("family_id");
+  if (error) return [];
+  const ids = new Set<string>();
+  for (const row of data ?? []) {
+    const id = typeof row.family_id === "string" ? row.family_id.trim() : "";
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
+export async function getFamilyNameById(client: KoreServerDbClient, familyId: string): Promise<string> {
+  const { data, error } = await client.from("families").select("name").eq("id", familyId).maybeSingle();
+  if (error || !data?.name?.trim()) return "tu familia";
+  return data.name.trim();
+}
+
+export async function getProfilesForFamily(client: KoreServerDbClient, familyId: string): Promise<Profile[]> {
+  const { data, error } = await client
+    .from("profiles")
+    .select("*")
+    .eq("family_id", familyId)
+    .order("name", { ascending: true });
+  if (error) return [];
+  return data ?? [];
+}
+
+/** Eventos de agenda en una fecha concreta (YYYY-MM-DD). */
+export async function getCalendarEventsOnDate(
+  client: KoreServerDbClient,
+  familyId: string,
+  dateIso: string,
+): Promise<CalendarEventRow[]> {
+  const day = dateIso.slice(0, 10);
+  const { data, error } = await client
+    .from("calendar_events")
+    .select("*")
+    .eq("family_id", familyId)
+    .eq("date", day)
+    .order("time", { ascending: true });
+  if (error) return [];
+  return (data ?? []) as CalendarEventRow[];
+}
+
+/**
+ * Salud relevante para el resumen matinal:
+ * - citas médicas con date_time en el día indicado (mañana)
+ * - medicamentos con next_dose_at vencido o para hoy/mañana
+ */
+export async function getHealthRecordsForDailySummary(
+  client: KoreServerDbClient,
+  familyId: string,
+  _todayIso: string,
+  tomorrowIso: string,
+): Promise<HealthRecord[]> {
+  const tomorrow = tomorrowIso.slice(0, 10);
+  const dayAfterTomorrow = formatDateIso(addDays(new Date(`${tomorrow}T12:00:00`), 1));
+
+  const [appointmentsRes, medicationsRes] = await Promise.all([
+    client
+      .from("health_records")
+      .select("*")
+      .eq("family_id", familyId)
+      .eq("type", "appointment")
+      .gte("date_time", `${tomorrow}T00:00:00`)
+      .lt("date_time", `${dayAfterTomorrow}T00:00:00`),
+    client
+      .from("health_records")
+      .select("*")
+      .eq("family_id", familyId)
+      .eq("type", "medication")
+      .not("next_dose_at", "is", null)
+      .lte("next_dose_at", `${tomorrow}T23:59:59.999Z`),
+  ]);
+
+  if (appointmentsRes.error && medicationsRes.error) return [];
+
+  const merged = [...(appointmentsRes.data ?? []), ...(medicationsRes.data ?? [])] as HealthRecord[];
+  const seen = new Set<string>();
+  return merged.filter((r) => {
+    if (seen.has(r.id)) return false;
+    seen.add(r.id);
+    return true;
+  });
+}
+
 /** Próximas tareas (después de hoy, dentro de N días). */
 export async function getUpcomingCleaningTasks(
   client: KoreServerDbClient,
