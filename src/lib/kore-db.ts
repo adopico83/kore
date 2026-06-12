@@ -1260,3 +1260,121 @@ export async function deleteSubscription(client: KoreServerDbClient, profileId: 
   const { error } = await client.from("push_subscriptions").delete().eq("profile_id", profileId);
   throwDb("deleteSubscription", error);
 }
+
+export type AdminStats = {
+  totalFamilies: number;
+  totalUsers: number;
+  totalPushSubscriptions: number;
+};
+
+export type AdminFamilyRow = {
+  id: string;
+  name: string;
+  ownerName: string;
+  ownerId: string | null;
+  createdAt: string | null;
+  memberCount: number;
+  inviteCode: string | null;
+};
+
+/** Tablas con family_id, en orden seguro para borrado en cascada. */
+const FAMILY_SCOPED_TABLES = [
+  "messages",
+  "conversations",
+  "school_events",
+  "domain_history",
+  "push_subscriptions",
+  "agent_messages",
+  "agent_memory",
+  "cleaning_tasks",
+  "daily_metrics",
+  "events_log",
+  "expenses",
+  "health_records",
+  "kore_notes",
+  "leisure_activities",
+  "menu_items",
+  "school_materials",
+  "shopping_items",
+  "sleep_sessions",
+  "sleep_logs",
+  "calendar_events",
+  "domains",
+] as const;
+
+async function deleteFamilyScopedRows(
+  client: KoreServerDbClient,
+  table: (typeof FAMILY_SCOPED_TABLES)[number],
+  familyId: string,
+): Promise<void> {
+  const { error } = await client.from(table).delete().eq("family_id", familyId);
+  throwDb(`deleteFamily.${table}`, error);
+}
+
+export async function getAdminStats(client: KoreServerDbClient): Promise<AdminStats> {
+  const [familiesRes, profilesRes, pushRes] = await Promise.all([
+    client.from("families").select("id", { count: "exact", head: true }),
+    client.from("profiles").select("id", { count: "exact", head: true }),
+    client.from("push_subscriptions").select("id", { count: "exact", head: true }),
+  ]);
+
+  return {
+    totalFamilies: familiesRes.count ?? 0,
+    totalUsers: profilesRes.count ?? 0,
+    totalPushSubscriptions: pushRes.count ?? 0,
+  };
+}
+
+export async function getAdminFamilies(client: KoreServerDbClient): Promise<AdminFamilyRow[]> {
+  const { data: families, error } = await client
+    .from("families")
+    .select("id, name, owner_id, created_at, invite_code")
+    .order("created_at", { ascending: false });
+  if (error) return [];
+
+  const { data: profiles } = await client.from("profiles").select("id, name, family_id");
+
+  const nameById = new Map((profiles ?? []).map((p) => [p.id, p.name]));
+  const countByFamily = new Map<string, number>();
+  for (const p of profiles ?? []) {
+    const fid = p.family_id?.trim();
+    if (!fid) continue;
+    countByFamily.set(fid, (countByFamily.get(fid) ?? 0) + 1);
+  }
+
+  return (families ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    ownerId: f.owner_id,
+    ownerName: f.owner_id ? (nameById.get(f.owner_id) ?? "—") : "—",
+    createdAt: f.created_at,
+    memberCount: countByFamily.get(f.id) ?? 0,
+    inviteCode: f.invite_code,
+  }));
+}
+
+export async function deleteFamilyCascade(client: KoreServerDbClient, familyId: string): Promise<void> {
+  const trimmed = familyId.trim();
+  if (!trimmed) throw new Error("familyId obligatorio");
+
+  const { data: existing, error: readErr } = await client
+    .from("families")
+    .select("id")
+    .eq("id", trimmed)
+    .maybeSingle();
+  throwDb("deleteFamily.read", readErr);
+  if (!existing) throw new Error("Familia no encontrada");
+
+  for (const table of FAMILY_SCOPED_TABLES) {
+    await deleteFamilyScopedRows(client, table, trimmed);
+  }
+
+  const { error: clearOwnerErr } = await client.from("families").update({ owner_id: null }).eq("id", trimmed);
+  throwDb("deleteFamily.clearOwner", clearOwnerErr);
+
+  const { error: profilesErr } = await client.from("profiles").delete().eq("family_id", trimmed);
+  throwDb("deleteFamily.profiles", profilesErr);
+
+  const { error: familyErr } = await client.from("families").delete().eq("id", trimmed);
+  throwDb("deleteFamily.families", familyErr);
+}
