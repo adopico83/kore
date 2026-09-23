@@ -16,7 +16,7 @@ export function HomeHeader({ familyName, adults, onOpenProfile }: HomeHeaderProp
   const label = familyName.trim();
 
   return (
-    <header className="fixed inset-x-0 top-0 z-30 border-b border-white/[0.07] bg-[#090b10]/95 backdrop-blur-md">
+    <header className="fixed inset-x-0 top-0 z-30 border-b border-white/[0.07] bg-[#14161b]/95 backdrop-blur-md">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4 md:px-8">
         <div className="flex min-w-0 items-center gap-2.5">
           <KoreMark />

@@ -21,6 +21,8 @@ describe("shell de inicio", () => {
         pendingDesktop={pending}
         domains={[]}
         onOpenCalendar={() => undefined}
+        onAddAgenda={() => undefined}
+        onAddPending={() => undefined}
         onComplete={onComplete}
         onOpenPending={() => undefined}
         onOpenCasa={() => undefined}
@@ -58,5 +60,40 @@ describe("shell de inicio", () => {
     expect(screen.getByRole("tab", { name: /Casa/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Corcho/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Yo/ })).toBeInTheDocument();
+  });
+
+  it("explica la agenda vacía y abre los flujos reales de añadir", () => {
+    const onAddAgenda = vi.fn();
+    const onAddPending = vi.fn();
+    const onOpenCalendar = vi.fn();
+    render(
+      <InicioView
+        greeting="Buenas, Ander"
+        dateLong="miércoles 23 · septiembre"
+        dateShort="miércoles 23"
+        agenda={[]}
+        pendingMobile={[]}
+        pendingDesktop={[]}
+        domains={[]}
+        onOpenCalendar={onOpenCalendar}
+        onAddAgenda={onAddAgenda}
+        onAddPending={onAddPending}
+        onComplete={() => undefined}
+        onOpenPending={() => undefined}
+        onOpenCasa={() => undefined}
+        onOpenDomain={() => undefined}
+        onDeactivateDomain={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText(/Sin eventos hoy/)).toBeInTheDocument();
+    expect(screen.getByText(/Toca Añadir para el primero de la semana/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Añadir a la agenda" }));
+    expect(onAddAgenda).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Ver semana" }));
+    expect(onOpenCalendar).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Añadir pendiente" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Compra/ }));
+    expect(onAddPending).toHaveBeenCalledWith("shopping");
   });
 });

@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight, Pencil, Trash2, X } from "lucide-react";
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
@@ -63,6 +63,8 @@ export type CalendarModalProps = {
   onClose: () => void;
   events: KoreAgendaEvent[];
   initialDate?: Date | null;
+  /** Enfoca el título de «Nueva cita» al abrir (atajo + Añadir de Inicio). */
+  focusComposer?: boolean;
   /** Modo local: mutaciones en memoria (sin handlers remotos). */
   onChange?: (next: KoreAgendaEvent[]) => void;
   /** Modo remoto: el padre persiste (p. ej. Supabase) y actualiza `events`. */
@@ -76,6 +78,7 @@ export function CalendarModal({
   events,
   onChange,
   initialDate,
+  focusComposer = false,
   onAddEvent,
   onUpdateEvent,
   onDeleteEvent,
@@ -91,6 +94,7 @@ export function CalendarModal({
   const [nuevoTitulo, setNuevoTitulo] = useState("");
   const [nuevaHora, setNuevaHora] = useState("");
   const [agendaAccionLoading, setAgendaAccionLoading] = useState(false);
+  const composerRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setFechaHoyIso(ymd(new Date()));
@@ -106,6 +110,14 @@ export function CalendarModal({
     setNuevoTitulo("");
     setNuevaHora("");
   }, [initialDate]);
+
+  useEffect(() => {
+    if (!focusComposer) return;
+    const handle = window.setTimeout(() => {
+      composerRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [focusComposer, initialDate]);
 
   const eventosPorFecha = useMemo(() => {
     const map = new Map<string, KoreAgendaEvent[]>();
@@ -647,11 +659,13 @@ export function CalendarModal({
                   Nueva cita
                 </p>
                 <input
+                  ref={composerRef}
                   type="text"
                   value={nuevoTitulo}
                   onChange={(e) => setNuevoTitulo(e.target.value)}
                   disabled={agendaAccionLoading}
                   placeholder="Título"
+                  aria-label="Título de la cita"
                   style={{
                     ...inputBase,
                     opacity: agendaAccionLoading ? 0.6 : 1,

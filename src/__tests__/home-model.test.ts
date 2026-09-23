@@ -56,6 +56,7 @@ describe("home inicio", () => {
       note: { id: "n1", title: "Mensaje de Leire", subtitle: "Corcho" },
     });
     expect(rows.mobile.map((row) => row.title)).toEqual(["Queso lonchas", "Baño", "Pan"]);
+    expect(rows.mobile.map((row) => row.subtitle)).toEqual(["Compra", "Limpieza · hoy", "Compra"]);
     expect(rows.desktop.map((row) => row.title)).toEqual(["Queso lonchas", "Baño", "Mensaje de Leire"]);
     expect(rows.mobile.some((row) => row.kind === "corcho")).toBe(false);
   });
