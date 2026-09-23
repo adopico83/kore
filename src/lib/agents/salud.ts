@@ -3,11 +3,12 @@ import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import type { AgentExecutionContext } from "./agent-execution-context";
 import { resolveProfileIdFromAgentToken } from "@/lib/family-utils";
 import {
-  addHealthRecord,
-  deleteHealthRecord,
+  addHealthRecordRow,
+  deleteHealthRecordRow,
   getHealthRecords,
-  updateHealthRecord,
+  updateHealthRecordRow,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildCitaHealthInsert,
   buildMedHealthInsert,
@@ -205,6 +206,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
   const { familyId, profiles } = ctx;
+  const admin = createAdminClient();
 
   switch (toolName) {
     case "add_appointment": {
@@ -222,7 +224,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         hora,
         lugar,
       });
-      const row = await addHealthRecord(familyId, insert);
+      const row = await addHealthRecordRow(admin, familyId, insert);
       return { ok: true, record: row };
     }
     case "add_medication": {
@@ -238,7 +240,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         frecuenciaHoras: frec,
         proximaToma: nextDose,
       });
-      const row = await addHealthRecord(familyId, insert);
+      const row = await addHealthRecordRow(admin, familyId, insert);
       return { ok: true, record: row };
     }
     case "log_medication_given": {
@@ -264,7 +266,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const target = cand[0];
       if (!target) return { error: "No se encontró medicación coincidente." };
       const next = new Date(Date.now() + 8 * 3600000).toISOString();
-      await updateHealthRecord(familyId, target.id, {
+      await updateHealthRecordRow(admin, familyId, target.id, {
         next_dose_at: next,
       });
       return { ok: true, updated_id: target.id, logged_at: timeNote, next_dose_at: next };
@@ -283,13 +285,13 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     case "complete_appointment": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await updateHealthRecord(familyId, id, { status: "completed" });
+      await updateHealthRecordRow(admin, familyId, id, { status: "completed" });
       return { ok: true, id };
     }
     case "delete_health_record": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await deleteHealthRecord(familyId, id);
+      await deleteHealthRecordRow(admin, familyId, id);
       return { ok: true, deleted: id };
     }
     default:

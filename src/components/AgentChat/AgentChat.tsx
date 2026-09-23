@@ -73,7 +73,7 @@ const toolToTable: Record<string, KoreTable[]> = {
   log_medication_given: ["health_records"],
   get_health_records: [],
   complete_appointment: ["health_records"],
-  delete_health_record: ["health_records"],
+  delete_health_record: ["health_records", "calendar_events"],
 
   // Corcho
   send_note: ["kore_notes"],

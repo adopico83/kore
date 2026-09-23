@@ -2,13 +2,14 @@
 
 import { getScopedFamilyId } from "@/lib/family-context";
 import {
-  addHealthRecord as dbAddHealthRecord,
-  deleteHealthRecord as dbDeleteHealthRecord,
-  getHealthRecords as dbGetHealthRecords,
-  updateHealthRecord as dbUpdateHealthRecord,
+  addHealthRecordRow,
+  deleteHealthRecordRow,
+  listHealthRecords,
+  updateHealthRecordRow,
   type HealthRecord,
   type HealthRecordInsert,
 } from "@/lib/kore-db";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 async function requireFamilyId(): Promise<string> {
   const familyId = await getScopedFamilyId();
@@ -18,20 +19,24 @@ async function requireFamilyId(): Promise<string> {
 
 export async function getHealthRecords(patientId?: string) {
   const familyId = await requireFamilyId();
-  return dbGetHealthRecords(familyId, patientId);
+  const admin = createAdminClient();
+  return listHealthRecords(admin, familyId, patientId);
 }
 
 export async function addHealthRecord(data: HealthRecordInsert) {
   const familyId = await requireFamilyId();
-  return dbAddHealthRecord(familyId, data);
+  const admin = createAdminClient();
+  return addHealthRecordRow(admin, familyId, data);
 }
 
 export async function updateHealthRecord(id: string, data: Partial<Omit<HealthRecord, "id" | "created_at">>) {
   const familyId = await requireFamilyId();
-  return dbUpdateHealthRecord(familyId, id, data);
+  const admin = createAdminClient();
+  return updateHealthRecordRow(admin, familyId, id, data);
 }
 
 export async function deleteHealthRecord(id: string) {
   const familyId = await requireFamilyId();
-  return dbDeleteHealthRecord(familyId, id);
+  const admin = createAdminClient();
+  return deleteHealthRecordRow(admin, familyId, id);
 }
