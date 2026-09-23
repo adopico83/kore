@@ -1,17 +1,17 @@
 "use client";
 
-import { History, Loader2, Paperclip, Trash2, X } from "lucide-react";
+import { History, Loader2, Trash2, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import {
   useCallback,
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type MouseEvent,
   type PointerEvent,
   type TouchEvent,
 } from "react";
+import { honestCorchoText } from "@/components/home/home-model";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 import { addKoreNote, getKoreNotes } from "@/lib/actions/corcho";
@@ -30,7 +30,6 @@ type CorchoMessage = {
   id: string;
   role: CorchoRole;
   content: string;
-  imagenPreviews?: string[];
   at: string;
 };
 
@@ -45,41 +44,6 @@ function formatHHMM(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-async function compressImage(file: File): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("read"));
-    reader.readAsDataURL(file);
-  });
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error("img"));
-    el.src = dataUrl;
-  });
-  const max = 1600;
-  let w = img.naturalWidth;
-  let h = img.naturalHeight;
-  if (w <= 0 || h <= 0) throw new Error("dims");
-  if (w > max || h > max) {
-    if (w >= h) {
-      h = Math.round((h * max) / w);
-      w = max;
-    } else {
-      w = Math.round((w * max) / h);
-      h = max;
-    }
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("ctx");
-  ctx.drawImage(img, 0, 0, w, h);
-  return canvas.toDataURL("image/jpeg", 0.82);
 }
 
 function ConvRow({
@@ -141,6 +105,8 @@ export type CorchoChatProps = {
   /** Perfil destinatario (otro adulto); obligatorio en BD para `recipient_id`. */
   partnerUserId: string;
   recipientName?: string;
+  /** Dentro de la pestaña, sin cubrir el chrome de la home. */
+  embedded?: boolean;
 };
 
 export function CorchoChat({
@@ -148,6 +114,7 @@ export function CorchoChat({
   currentUserId,
   partnerUserId,
   recipientName = "tu pareja",
+  embedded = false,
 }: CorchoChatProps) {
   useEscapeKey(onClose);
   const [mensaje, setMensaje] = useState("");
@@ -158,10 +125,8 @@ export function CorchoChat({
   const [error, setError] = useState("");
   const [grabando, setGrabando] = useState(false);
   const [transcribiendo, setTranscribiendo] = useState(false);
-  const [imagenesPendientes, setImagenesPendientes] = useState<string[]>([]);
 
   const listRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
@@ -176,7 +141,7 @@ export function CorchoChat({
     const mapped: CorchoMessage[] = [...latest].reverse().map((row) => ({
       id: row.id,
       role: row.sender_id === currentUserId ? "me" : "partner",
-      content: String(row.content ?? "").trim(),
+      content: honestCorchoText(String(row.content ?? "").trim()),
       at: row.created_at ?? "",
     }));
     setHistorial(mapped);
@@ -215,7 +180,6 @@ export function CorchoChat({
     setMensaje("");
     setError("");
     setPanelHistorial(false);
-    setImagenesPendientes([]);
   };
 
   const seleccionarConversacion = (id: string) => {
@@ -228,33 +192,11 @@ export function CorchoChat({
     setPanelHistorial(false);
   };
 
-  const handleImagen = async (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
-    if (!files.length) return;
-    setError("");
-    const incoming: string[] = [];
-    for (const file of files) {
-      if (!file.type.startsWith("image/")) {
-        setError("Solo imágenes.");
-        return;
-      }
-      try {
-        incoming.push(await compressImage(file));
-      } catch {
-        setError("No se pudo procesar una imagen.");
-        return;
-      }
-    }
-    setImagenesPendientes((prev) => [...prev, ...incoming].slice(0, 12));
-  };
-
   const handleEnviarTexto = async (texto: string, fromTranscription?: boolean) => {
     const clean = texto.trim();
-    const imagenes = imagenesPendientes;
-    if (!clean && imagenes.length === 0) {
+    if (!clean) {
       if (fromTranscription) setTranscribiendo(false);
-      setError("Escribe un mensaje o adjunta una imagen.");
+      setError("Escribe un mensaje. Las fotos no se guardan en el corcho.");
       return;
     }
     const uid = currentUserId.trim();
@@ -269,16 +211,8 @@ export function CorchoChat({
       return;
     }
 
-    const msg: CorchoMessage = {
-      id: crypto.randomUUID?.() ?? `m_${Date.now()}`,
-      role: "me",
-      content: clean || (imagenes.length > 1 ? `📎 ${imagenes.length} imágenes` : "📎 Imagen"),
-      imagenPreviews: imagenes.length ? imagenes.slice() : undefined,
-      at: new Date().toISOString(),
-    };
-    const persistedText = msg.content;
     await addKoreNote({
-      content: persistedText,
+      content: clean,
       sender_id: uid,
       recipient_id: pid,
       audio_url: null,
@@ -288,7 +222,6 @@ export function CorchoChat({
     await loadMessages();
     emitKoreUpdate(["kore_notes"]);
     setMensaje("");
-    setImagenesPendientes([]);
     setError("");
     if (fromTranscription) setTranscribiendo(false);
   };
@@ -415,20 +348,15 @@ export function CorchoChat({
 
   return (
     <div
-      style={{ position: "fixed", inset: 0, zIndex: 8000, display: "flex", flexDirection: "column", background: BG }}
-      role="dialog"
-      aria-modal="true"
+      style={
+        embedded
+          ? { position: "relative", flex: 1, minHeight: 0, height: "100%", display: "flex", flexDirection: "column", background: BG }
+          : { position: "fixed", inset: 0, zIndex: 8000, display: "flex", flexDirection: "column", background: BG }
+      }
+      role={embedded ? "region" : "dialog"}
+      aria-modal={embedded ? undefined : true}
       aria-label={`Mensajes con ${recipientName}`}
     >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
-        aria-hidden
-        onChange={(e) => void handleImagen(e)}
-      />
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.08)", padding: 12 }}>
         <div style={{ display: "flex", minWidth: 0, flexWrap: "wrap", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{`Mensajes con ${recipientName}`}</span>
@@ -493,13 +421,6 @@ export function CorchoChat({
                         border: isMe ? "none" : `1px solid ${PURPLE}55`,
                       }}
                     >
-                      {(msg.imagenPreviews ?? []).length > 0 ? (
-                        <div style={{ marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 6, justifyContent: isMe ? "flex-end" : "flex-start" }}>
-                          {(msg.imagenPreviews ?? []).map((src, idx) => (
-                            <img key={`${msg.id}-${idx}`} src={src} alt="" style={{ maxHeight: 112, maxWidth: "45%", borderRadius: 6, border: "1px solid rgba(0,0,0,0.2)", objectFit: "cover" }} />
-                          ))}
-                        </div>
-                      ) : null}
                       <p style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 14 }}>{msg.content}</p>
                     </div>
                     <p style={{ margin: "4px 0 0", textAlign: isMe ? "right" : "left", fontSize: 10, color: "rgba(255,255,255,0.45)" }}>
@@ -527,23 +448,9 @@ export function CorchoChat({
             {error}
           </div>
         ) : null}
-        {imagenesPendientes.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", padding: 8 }}>
-            {imagenesPendientes.map((src, idx) => (
-              <div key={`img-${idx}-${src.slice(0, 20)}`} style={{ position: "relative" }}>
-                <img src={src} alt="" style={{ width: 64, height: 64, borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", objectFit: "cover" }} />
-                <button
-                  type="button"
-                  onClick={() => setImagenesPendientes((prev) => prev.filter((_, i) => i !== idx))}
-                  aria-label="Quitar imagen"
-                  style={{ position: "absolute", top: -4, right: -4, borderRadius: 999, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(0,0,0,0.7)", color: "#fff", padding: 4, lineHeight: 0, cursor: "pointer" }}
-                >
-                  <X width={12} height={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+          Las fotos no se guardan. Escribe el recado en texto.
+        </p>
         <textarea
           value={mensaje}
           onChange={(e) => setMensaje(e.target.value)}
@@ -560,20 +467,9 @@ export function CorchoChat({
         <div style={{ display: "flex", minHeight: 44, alignItems: "stretch", gap: 8 }}>
           <button
             type="button"
-            aria-label="Adjuntar imagen"
-            onClick={() => fileInputRef.current?.click()}
-            style={{ display: "flex", width: 44, alignItems: "center", justifyContent: "center", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.1)", color: "#fff", cursor: "pointer" }}
-          >
-            <Paperclip width={20} height={20} />
-          </button>
-          <button
-            type="button"
             onClick={handleEnviar}
-            {...touchEnd(
-              handleEnviar,
-              transcribiendo || grabando || !canSendCorcho || (mensaje.trim().length === 0 && imagenesPendientes.length === 0),
-            )}
-            disabled={transcribiendo || grabando || !canSendCorcho || (mensaje.trim().length === 0 && imagenesPendientes.length === 0)}
+            {...touchEnd(handleEnviar, transcribiendo || grabando || !canSendCorcho || mensaje.trim().length === 0)}
+            disabled={transcribiendo || grabando || !canSendCorcho || mensaje.trim().length === 0}
             style={{ flex: 1, minWidth: 0, borderRadius: 8, border: "none", background: GREEN, color: "#0a1a14", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
           >
             Enviar
