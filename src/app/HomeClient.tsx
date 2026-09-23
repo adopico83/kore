@@ -52,6 +52,7 @@ import {
   deleteCalendarEvent,
 } from "@/lib/actions/calendar";
 import { getHealthRecords } from "@/lib/actions/health";
+import { describeAppointment, describeMedication } from "@/lib/kore-salud-sync";
 import { getExpenses } from "@/lib/actions/expenses";
 import { getKoreNotes } from "@/lib/actions/corcho";
 import {
@@ -174,23 +175,17 @@ function mapHealthRowsToDynamicSalud(rows: HealthRecord[]): DynamicSaludData {
     if (!out[r.patient_id]) out[r.patient_id] = emptyHealthMember();
 
     if (r.type === "appointment" && (r.date_time ?? "").trim()) {
-      const raw = r.date_time ?? "";
-      const [fecha, horaRaw] = raw.includes("T") ? raw.split("T") : [raw, ""];
-      out[r.patient_id].citas.push({
-        id: r.id,
-        descripcion: r.description ?? "",
-        fecha: fecha ?? "",
-        hora: (horaRaw ?? "").slice(0, 5),
-        lugar: "",
-      });
+      const view = describeAppointment(r.description, r.date_time);
+      out[r.patient_id].citas.push({ id: r.id, ...view });
     }
 
     if (r.type === "medication" && (r.next_dose_at ?? "").trim()) {
-      const raw = r.next_dose_at ?? "";
+      const view = describeMedication(r.description, r.next_dose_at);
+      const raw = view.proximaToma || r.next_dose_at || "";
       const [fecha, horaRaw] = raw.includes("T") ? raw.split("T") : [raw, ""];
       out[r.patient_id].medicaciones.push({
         id: r.id,
-        descripcion: r.description ?? "",
+        descripcion: view.dosis ? `${view.nombre} · ${view.dosis}` : view.nombre,
         fecha: fecha ?? "",
         hora: (horaRaw ?? "").slice(0, 5),
         lugar: "",

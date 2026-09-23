@@ -61,20 +61,16 @@ function estimateEntityCountForDomain(domain: string, userMsg: string): number {
 }
 
 function enforceCalendarPairRule(plan: PlannedTool[]): PlannedTool[] {
-  const hasAppointment = plan.some((p) => p.tool === "add_appointment");
+  // Las citas crean su evento de agenda en addHealthRecordRow. Emparejar aquí
+  // duplicaría la fila. El colegio sigue dependiendo de este plan.
   const hasSchoolEvent = plan.some((p) => p.tool === "add_school_event");
   const hasCalendar = plan.some((p) => p.tool === "add_calendar_event");
-  if ((!hasAppointment && !hasSchoolEvent) || hasCalendar) return plan;
+  if (!hasSchoolEvent || hasCalendar) return plan;
 
-  const source = hasAppointment
-    ? plan.find((p) => p.tool === "add_appointment")
-    : plan.find((p) => p.tool === "add_school_event");
+  const source = plan.find((p) => p.tool === "add_school_event");
   if (!source) return plan;
 
-  const title =
-    source.tool === "add_appointment"
-      ? String(source.args.description ?? "Cita médica")
-      : String(source.args.title ?? "Evento");
+  const title = String(source.args.title ?? "Evento");
   const date = String(source.args.date ?? "").trim();
   const time = String(source.args.time ?? "09:00").trim() || "09:00";
   if (!date) return plan;

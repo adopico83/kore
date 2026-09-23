@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { LS_KORE_SALUD, type SaludData } from "@/components/SaludModal";
+import { SaludPickerField } from "@/components/SaludModal/SaludPickerField";
 import {
   addHealthRecord,
   deleteHealthRecord,
@@ -127,7 +128,7 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
     try {
       await deleteHealthRecord(id);
       await reloadFromRemote();
-      emitKoreUpdate(["health_records"]);
+      emitKoreUpdate(["health_records", "calendar_events"]);
     } catch {
       const next = structuredClone(data);
       if (!next[memberId]) return;
@@ -174,7 +175,7 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
       );
       setEditingKey(null);
       await reloadFromRemote();
-      emitKoreUpdate(["health_records"]);
+      emitKoreUpdate(["health_records", "calendar_events"]);
     } catch {
       const next = structuredClone(data);
       if (!next[memberId]) return;
@@ -246,7 +247,7 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
         setNewCita({ descripcion: "", fecha: "", hora: "", lugar: "" });
         setAddingMemberId(null);
         await reloadFromRemote();
-        emitKoreUpdate(["health_records"]);
+        emitKoreUpdate(["health_records", "calendar_events"]);
       } catch {
         const next = structuredClone(data);
         if (!next[addingMemberId]) next[addingMemberId] = emptyMember();
@@ -368,8 +369,8 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
                             <div style={{ display: "grid", gap: 8 }}>
                               <input value={citaDraft.descripcion} onChange={(e) => setCitaDraft((d) => ({ ...d, descripcion: e.target.value }))} placeholder="Descripción" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                               <div style={{ display: "flex", gap: 6 }}>
-                                <input type="date" value={citaDraft.fecha} onChange={(e) => setCitaDraft((d) => ({ ...d, fecha: e.target.value }))} style={{ flex: 1, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
-                                <input type="time" value={citaDraft.hora} onChange={(e) => setCitaDraft((d) => ({ ...d, hora: e.target.value }))} style={{ flex: 1, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                                <SaludPickerField fill kind="date" value={citaDraft.fecha} onChange={(fecha) => setCitaDraft((d) => ({ ...d, fecha }))} />
+                                <SaludPickerField fill kind="time" value={citaDraft.hora} onChange={(hora) => setCitaDraft((d) => ({ ...d, hora }))} />
                               </div>
                               <input value={citaDraft.lugar} onChange={(e) => setCitaDraft((d) => ({ ...d, lugar: e.target.value }))} placeholder="Lugar" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                               <div style={{ display: "flex", gap: 6 }}>
@@ -407,7 +408,7 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
                               <input value={medDraft.nombre} onChange={(e) => setMedDraft((d) => ({ ...d, nombre: e.target.value }))} placeholder="Nombre" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                               <input value={medDraft.dosis} onChange={(e) => setMedDraft((d) => ({ ...d, dosis: e.target.value }))} placeholder="Dosis" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                               <input value={String(medDraft.frecuenciaHoras)} onChange={(e) => setMedDraft((d) => ({ ...d, frecuenciaHoras: Number(e.target.value) || d.frecuenciaHoras }))} inputMode="numeric" placeholder="Frecuencia horas" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
-                              <input type="datetime-local" value={medDraft.proximaToma} onChange={(e) => setMedDraft((d) => ({ ...d, proximaToma: e.target.value }))} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                              <SaludPickerField kind="datetime-local" value={medDraft.proximaToma} onChange={(proximaToma) => setMedDraft((d) => ({ ...d, proximaToma }))} />
                               <div style={{ display: "flex", gap: 6 }}>
                                 <button type="button" onClick={() => void saveEditMed(member.id, m.id)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "none", background: "#4CC9A0", color: "#0a1a14", padding: "10px 12px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>Guardar</button>
                                 <button type="button" onClick={() => setEditingKey(null)} style={{ minHeight: 44, minWidth: 44, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#e4e6ed", padding: "10px 12px", cursor: "pointer", fontSize: 13 }}>Cancelar</button>
@@ -439,8 +440,8 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
                     <>
                       <input value={newCita.descripcion} onChange={(e) => setNewCita((d) => ({ ...d, descripcion: e.target.value }))} placeholder="Descripción" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                       <div style={{ display: "flex", gap: 6 }}>
-                        <input type="date" value={newCita.fecha} onChange={(e) => setNewCita((d) => ({ ...d, fecha: e.target.value }))} style={{ flex: 1, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
-                        <input type="time" value={newCita.hora} onChange={(e) => setNewCita((d) => ({ ...d, hora: e.target.value }))} style={{ flex: 1, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                        <SaludPickerField fill kind="date" value={newCita.fecha} onChange={(fecha) => setNewCita((d) => ({ ...d, fecha }))} />
+                        <SaludPickerField fill kind="time" value={newCita.hora} onChange={(hora) => setNewCita((d) => ({ ...d, hora }))} />
                       </div>
                       <input value={newCita.lugar} onChange={(e) => setNewCita((d) => ({ ...d, lugar: e.target.value }))} placeholder="Lugar" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                     </>
@@ -449,7 +450,7 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
                       <input value={newMed.nombre} onChange={(e) => setNewMed((d) => ({ ...d, nombre: e.target.value }))} placeholder="Nombre" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                       <input value={newMed.dosis} onChange={(e) => setNewMed((d) => ({ ...d, dosis: e.target.value }))} placeholder="Dosis" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
                       <input value={newMed.frecuenciaHoras} onChange={(e) => setNewMed((d) => ({ ...d, frecuenciaHoras: e.target.value }))} inputMode="numeric" placeholder="Frecuencia (horas)" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
-                      <input type="datetime-local" value={newMed.proximaToma} onChange={(e) => setNewMed((d) => ({ ...d, proximaToma: e.target.value }))} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
+                      <SaludPickerField kind="datetime-local" value={newMed.proximaToma} onChange={(proximaToma) => setNewMed((d) => ({ ...d, proximaToma }))} />
                     </>
                   )}
                   <div style={{ display: "flex", gap: 6 }}>

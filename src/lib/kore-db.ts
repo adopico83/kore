@@ -7,6 +7,11 @@ import {
   formatDateIso,
   todayIsoDate,
 } from "@/lib/cleaning-schedule";
+import {
+  agendaFieldsForAppointment,
+  calendarEventIdFromDescription,
+  descriptionWithCalendarEventId,
+} from "@/lib/kore-salud-sync";
 import type { Database, Json } from "@/types/database";
 import { getBrowserClient } from "@/lib/supabase/client";
 
@@ -336,6 +341,16 @@ export async function updateCalendarEvent(
   throwDb("updateCalendarEvent", error);
 }
 
+export async function updateCalendarEventRow(
+  client: KoreServerDbClient,
+  familyId: string,
+  id: string,
+  data: Partial<Pick<CalendarEventRow, "title" | "date" | "time" | "created_by">>,
+): Promise<void> {
+  const { error } = await client.from("calendar_events").update(data).eq("family_id", familyId).eq("id", id);
+  throwDb("updateCalendarEventRow", error);
+}
+
 export type HealthRecordInsert = Database["public"]["Tables"]["health_records"]["Insert"];
 
 export async function getHealthRecords(familyId: string, patientId?: string): Promise<HealthRecord[]> {
@@ -372,6 +387,146 @@ export async function updateHealthRecord(
 export async function deleteHealthRecord(familyId: string, id: string): Promise<void> {
   const { error } = await db().from("health_records").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteHealthRecord", error);
+}
+
+export async function listHealthRecords(
+  client: KoreServerDbClient,
+  familyId: string,
+  patientId?: string,
+): Promise<HealthRecord[]> {
+  let query = client.from("health_records").select("*").eq("family_id", familyId).order("created_at", { ascending: false });
+  if (patientId) query = query.eq("patient_id", patientId);
+  const { data, error } = await query;
+  if (error) return [];
+  return data ?? [];
+}
+
+/**
+ * Alta de un registro de salud.
+ * Una cita es la dueña de su fila en la agenda: se inserta el `calendar_events`
+ * en el mismo paso y el id queda dentro de la descripción. Medicaciones no tocan la agenda.
+ */
+export async function addHealthRecordRow(
+  client: KoreServerDbClient,
+  familyId: string,
+  data: HealthRecordInsert,
+): Promise<HealthRecord> {
+  let calendarId: string | null = null;
+  let description = data.description;
+  if (data.type === "appointment") {
+    const fields = agendaFieldsForAppointment(data.description, data.date_time ?? null);
+    if (fields) {
+      const calendarRow = await addCalendarEvent(client, familyId, {
+        title: fields.title,
+        date: fields.date,
+        time: fields.time,
+        created_by: data.patient_id,
+      });
+      calendarId = calendarRow.id;
+      description = descriptionWithCalendarEventId(description, calendarRow.id, {
+        patientId: data.patient_id,
+        fecha: fields.date,
+        hora: fields.time,
+      });
+    }
+  }
+
+  const { data: created, error } = await client
+    .from("health_records")
+    .insert({ ...data, description, family_id: familyId })
+    .select("*")
+    .single();
+
+  if (error) {
+    if (calendarId) {
+      try {
+        await deleteCalendarEvent(client, familyId, calendarId);
+      } catch {
+        /* La cita no llegó a guardarse. */
+      }
+    }
+    throwDb("addHealthRecordRow", error);
+  }
+  return created as HealthRecord;
+}
+
+async function readHealthRecordRow(
+  client: KoreServerDbClient,
+  familyId: string,
+  id: string,
+): Promise<HealthRecord | null> {
+  const { data, error } = await client
+    .from("health_records")
+    .select("*")
+    .eq("family_id", familyId)
+    .eq("id", id)
+    .maybeSingle();
+  throwDb("readHealthRecordRow", error);
+  return (data as HealthRecord | null) ?? null;
+}
+
+/** Actualiza el registro y, si es una cita, la fila de agenda enlazada. */
+export async function updateHealthRecordRow(
+  client: KoreServerDbClient,
+  familyId: string,
+  id: string,
+  data: Partial<Omit<HealthRecord, "id" | "created_at">>,
+): Promise<void> {
+  const existing = await readHealthRecordRow(client, familyId, id);
+  if (!existing) throw new Error("updateHealthRecordRow: registro no encontrado");
+
+  let nextDescription = data.description ?? existing.description;
+  const nextDateTime = data.date_time !== undefined ? data.date_time : existing.date_time;
+  const nextType = data.type ?? existing.type;
+
+  if (nextType === "appointment") {
+    const fields = agendaFieldsForAppointment(nextDescription, nextDateTime);
+    if (fields) {
+      const linkedId =
+        calendarEventIdFromDescription(existing.description) ?? calendarEventIdFromDescription(nextDescription);
+      let calendarId = linkedId;
+      if (linkedId) {
+        await updateCalendarEventRow(client, familyId, linkedId, {
+          title: fields.title,
+          date: fields.date,
+          time: fields.time,
+        });
+      } else {
+        const created = await addCalendarEvent(client, familyId, {
+          title: fields.title,
+          date: fields.date,
+          time: fields.time,
+          created_by: data.patient_id ?? existing.patient_id,
+        });
+        calendarId = created.id;
+      }
+      if (calendarId) {
+        nextDescription = descriptionWithCalendarEventId(nextDescription, calendarId, {
+          patientId: data.patient_id ?? existing.patient_id,
+          fecha: fields.date,
+          hora: fields.time,
+        });
+      }
+    }
+  }
+
+  const { error } = await client
+    .from("health_records")
+    .update({ ...data, description: nextDescription })
+    .eq("family_id", familyId)
+    .eq("id", id);
+  throwDb("updateHealthRecordRow", error);
+}
+
+/** Borra el registro y, si era una cita, también su evento de agenda. */
+export async function deleteHealthRecordRow(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const existing = await readHealthRecordRow(client, familyId, id);
+  if (existing?.type === "appointment") {
+    const calendarId = calendarEventIdFromDescription(existing.description);
+    if (calendarId) await deleteCalendarEvent(client, familyId, calendarId);
+  }
+  const { error } = await client.from("health_records").delete().eq("family_id", familyId).eq("id", id);
+  throwDb("deleteHealthRecordRow", error);
 }
 
 export type ExpenseInsert = Database["public"]["Tables"]["expenses"]["Insert"];

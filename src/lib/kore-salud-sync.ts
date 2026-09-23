@@ -21,6 +21,8 @@ type KoreCitaPayloadV1 = {
   fecha: string;
   hora: string;
   lugar: string;
+  /** Evento de agenda creado junto con la cita. */
+  calendar_event_id?: string;
 };
 
 type KoreMedPayloadV1 = {
@@ -40,6 +42,8 @@ type KoreCitaPayloadV2 = {
   fecha: string;
   hora: string;
   lugar: string;
+  /** Evento de agenda creado junto con la cita. */
+  calendar_event_id?: string;
 };
 
 type KoreMedPayloadV2 = {
@@ -95,6 +99,100 @@ function dateTimeFromParts(fecha: string, hora: string): string {
   return `${fecha}T${h}:00`;
 }
 
+export function calendarEventIdFromDescription(description: string | null | undefined): string | null {
+  try {
+    const parsed = JSON.parse(description ?? "") as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const id = (parsed as { calendar_event_id?: unknown }).calendar_event_id;
+    return typeof id === "string" && id.trim() ? id.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Texto visible de una cita, tanto si `description` es JSON v1/v2 como texto plano. */
+export function describeAppointment(
+  description: string | null | undefined,
+  dateTime: string | null | undefined,
+): { descripcion: string; fecha: string; hora: string; lugar: string } {
+  const payload = parseJsonPayload(description ?? "");
+  const dt = (dateTime ?? "").trim();
+  const [dtFecha, rest] = dt.includes("T") ? dt.split("T") : [dt, ""];
+  const dtHora = rest ? rest.slice(0, 5) : "";
+  if (payload && payload.kind === "cita") {
+    return {
+      descripcion: payload.descripcion,
+      fecha: (payload.fecha || dtFecha).slice(0, 10),
+      hora: (payload.hora || dtHora).slice(0, 5),
+      lugar: "lugar" in payload ? (payload.lugar ?? "") : "",
+    };
+  }
+  return {
+    descripcion: (description ?? "").trim(),
+    fecha: (dtFecha ?? "").slice(0, 10),
+    hora: dtHora,
+    lugar: "",
+  };
+}
+
+export function describeMedication(
+  description: string | null | undefined,
+  nextDose: string | null | undefined,
+): { nombre: string; dosis: string; frecuenciaHoras: number; proximaToma: string } {
+  const payload = parseJsonPayload(description ?? "");
+  if (payload && payload.kind === "med") {
+    return {
+      nombre: payload.nombre,
+      dosis: payload.dosis,
+      frecuenciaHoras: payload.frecuenciaHoras,
+      proximaToma: nextDose ?? "",
+    };
+  }
+  return {
+    nombre: (description ?? "").slice(0, 120),
+    dosis: "",
+    frecuenciaHoras: 0,
+    proximaToma: nextDose ?? "",
+  };
+}
+
+/** Título, día y hora para la fila de `calendar_events` que representa la cita. */
+export function agendaFieldsForAppointment(
+  description: string | null | undefined,
+  dateTime: string | null | undefined,
+): { title: string; date: string; time: string } | null {
+  const view = describeAppointment(description, dateTime);
+  const date = view.fecha.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const time = /^(\d{2}:\d{2})/.exec(view.hora.trim())?.[1] ?? "09:00";
+  const base = (view.descripcion.trim() || "Cita médica").slice(0, 140);
+  const lugar = view.lugar.trim();
+  const title = (lugar ? `Cita · ${base} · ${lugar}` : `Cita · ${base}`).slice(0, 180);
+  return { title, date, time };
+}
+
+/** Guarda el id del evento de agenda dentro de la descripción, sin perder el texto de la cita. */
+export function descriptionWithCalendarEventId(
+  description: string,
+  calendarEventId: string,
+  fallback: { patientId: string; fecha: string; hora: string; lugar?: string },
+): string {
+  const payload = parseJsonPayload(description);
+  if (payload && payload.kind === "cita") {
+    return JSON.stringify({ ...payload, calendar_event_id: calendarEventId });
+  }
+  return JSON.stringify({
+    v: 2,
+    kind: "cita",
+    patient_id: fallback.patientId,
+    descripcion: description.trim(),
+    fecha: fallback.fecha,
+    hora: fallback.hora,
+    lugar: fallback.lugar ?? "",
+    calendar_event_id: calendarEventId,
+  } satisfies KoreCitaPayloadV2);
+}
+
 export function saludFromHealthRecords(rows: HealthRecord[], profiles: Profile[]): MappedSaludData {
   const out = emptySaludForProfiles(profiles);
   const ensure = (pid: string) => {
@@ -107,49 +205,12 @@ export function saludFromHealthRecords(rows: HealthRecord[], profiles: Profile[]
     ensure(memberKey);
 
     if (r.type === "appointment") {
-      const payload = parseJsonPayload(r.description);
-      if (payload && payload.kind === "cita") {
-        out[memberKey].citas.push({
-          id: r.id,
-          descripcion: payload.descripcion,
-          fecha: payload.fecha,
-          hora: payload.hora,
-          lugar: "lugar" in payload ? (payload.lugar ?? "") : "",
-        });
-        continue;
-      }
-      const dt = (r.date_time ?? "").trim();
-      const [fecha, rest] = dt.includes("T") ? dt.split("T") : [r.date_time ?? "", ""];
-      const hora = rest ? rest.slice(0, 5) : "";
-      out[memberKey].citas.push({
-        id: r.id,
-        descripcion: (r.description ?? "").slice(0, 200),
-        fecha: fecha.slice(0, 10),
-        hora,
-        lugar: "",
-      });
+      out[memberKey].citas.push({ id: r.id, ...describeAppointment(r.description, r.date_time) });
       continue;
     }
 
     if (r.type === "medication") {
-      const payload = parseJsonPayload(r.description);
-      if (payload && payload.kind === "med") {
-        out[memberKey].medicaciones.push({
-          id: r.id,
-          nombre: payload.nombre,
-          dosis: payload.dosis,
-          frecuenciaHoras: payload.frecuenciaHoras,
-          proximaToma: r.next_dose_at ?? "",
-        });
-        continue;
-      }
-      out[memberKey].medicaciones.push({
-        id: r.id,
-        nombre: (r.description ?? "").slice(0, 120),
-        dosis: "",
-        frecuenciaHoras: 0,
-        proximaToma: r.next_dose_at ?? "",
-      });
+      out[memberKey].medicaciones.push({ id: r.id, ...describeMedication(r.description, r.next_dose_at) });
     }
   }
   return out;

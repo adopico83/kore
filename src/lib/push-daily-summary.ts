@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 
 import { addDays, formatDateIso, todayIsoDate } from "@/lib/cleaning-schedule";
+import { describeAppointment, describeMedication } from "@/lib/kore-salud-sync";
 import {
   getCalendarEventsOnDate,
   getFamilyNameById,
@@ -41,17 +42,20 @@ function mapHealthItems(
 ): DailySummaryHealthItem[] {
   return records.map((r) => {
     if (r.type === "appointment") {
+      const view = describeAppointment(r.description, r.date_time);
+      const description = view.lugar.trim() ? `${view.descripcion} · ${view.lugar.trim()}` : view.descripcion;
       return {
         kind: "appointment" as const,
         patientName: nameFor(r.patient_id),
-        description: r.description,
-        whenLabel: timeLabel(r.date_time) || "mañana",
+        description,
+        whenLabel: view.hora || timeLabel(r.date_time) || "mañana",
       };
     }
+    const med = describeMedication(r.description, r.next_dose_at);
     return {
       kind: "medication" as const,
       patientName: nameFor(r.patient_id),
-      description: r.description,
+      description: med.dosis ? `${med.nombre} ${med.dosis}`.trim() : med.nombre,
       whenLabel: timeLabel(r.next_dose_at) || "pendiente",
     };
   });
