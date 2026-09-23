@@ -2,7 +2,6 @@
 
 import { AgentChat } from "@/components/AgentChat/AgentChat";
 import { CorchoChat } from "@/components/CorchoChat";
-import { CorchoHistorial } from "@/components/CorchoHistorial";
 import { DomainModal, type DomainItem } from "@/components/DomainModal";
 import { EconomiaModal, type ExpenseItem } from "@/components/EconomiaModal";
 import { PerfilModal, type PerfilCitaRow, type PerfilNavigateTipo } from "@/components/PerfilModal";
@@ -14,9 +13,21 @@ import {
   type CalendarEventUpdateDraft,
   type KoreAgendaEvent,
 } from "@/components/CalendarModal/CalendarModal";
-import Link from "next/link";
-import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CasaView } from "@/components/home/CasaView";
+import { HomeHeader } from "@/components/home/HomeHeader";
+import { HomeTabBar } from "@/components/home/HomeTabBar";
+import { InicioView } from "@/components/home/InicioView";
+import { YoView } from "@/components/home/YoView";
+import {
+  buildPendingRows,
+  buildTodayAgenda,
+  formatHomeDate,
+  greetingFor,
+  honestCorchoText,
+  type HomeTab,
+  type PendingRow,
+} from "@/components/home/home-model";
 
 import type { DomainHistoryEntry } from "@/components/DomainModal";
 import {
@@ -52,29 +63,17 @@ import {
   getDomains,
   updateDomain,
 } from "@/lib/actions/domains";
-import { getShoppingItems } from "@/lib/actions/shopping";
-import { getPendingCleaningTasks } from "@/lib/actions/cleaning";
+import { completeShoppingItem, getShoppingItems } from "@/lib/actions/shopping";
+import { completeCleaningTask, getPendingCleaningTasks } from "@/lib/actions/cleaning";
 import { getWeeklyMenu } from "@/lib/actions/menu";
 import { getSchoolEvents } from "@/lib/actions/school";
 import { getSleepSessions } from "@/lib/actions/sleep";
-import { subscribeToNotificationsAction, unsubscribeFromNotificationsAction } from "@/lib/actions/push";
+import { subscribeToNotificationsAction } from "@/lib/actions/push";
 import { useKoreRealtime } from "@/lib/kore-realtime";
 import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
 import { getFamilyContext, resolvePartnerProfile, shouldShowPartnerInviteWidget } from "@/lib/family-utils";
 import { BASE_DOMAINS } from "@/lib/domains-catalog";
 import { getBrowserClient } from "@/lib/supabase/client";
-
-function avatarStressBorder(level: number): string {
-  if (level >= 8) return "#10b981";
-  if (level >= 4) return "#f59e0b";
-  return "#E05555";
-}
-
-function avatarStressShadow(level: number): string {
-  if (level >= 8) return "0 0 12px rgba(16, 185, 129, 0.3)";
-  if (level >= 4) return "0 0 12px rgba(245, 158, 11, 0.3)";
-  return "0 0 12px rgba(224, 85, 85, 0.35)";
-}
 
 const C = {
   bg: "#090b10",
@@ -89,12 +88,6 @@ const C = {
   red: "#E05555",
 } as const;
 
-const SKEL = {
-  bg: "rgba(255, 255, 255, 0.06)",
-  fg: "rgba(255, 255, 255, 0.12)",
-  line: "rgba(255, 255, 255, 0.08)",
-} as const;
-
 function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -105,93 +98,6 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
     outputArray[i] = rawData.charCodeAt(i);
   }
   return outputArray;
-}
-
-const sectionLabel: CSSProperties = {
-  fontSize: "10px",
-  fontFamily: "ui-monospace, monospace",
-  letterSpacing: "2px",
-  textTransform: "uppercase",
-  fontWeight: 600,
-  color: C.label,
-  margin: "0 16px 14px",
-};
-
-const cardShell: CSSProperties = {
-  background: C.card,
-  border: C.border,
-  borderRadius: "14px",
-  padding: "14px",
-  margin: "16px",
-  color: C.text,
-};
-
-type WeekDay = {
-  key: string;
-  label: string;
-  num: number;
-  isToday: boolean;
-  dots: string[];
-  date: Date;
-};
-
-function ymdParts(d: Date) {
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
-function formatMesAnioEs(d: Date) {
-  const meses = [
-    "Enero",
-    "Febrero",
-    "Marzo",
-    "Abril",
-    "Mayo",
-    "Junio",
-    "Julio",
-    "Agosto",
-    "Septiembre",
-    "Octubre",
-    "Noviembre",
-    "Diciembre",
-  ];
-  return `${meses[d.getMonth()]} ${d.getFullYear()}`;
-}
-
-function ymdIso(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function dotsForDate(d: Date, events: KoreAgendaEvent[]): string[] {
-  const iso = ymdIso(d);
-  const list = events.filter((e) => (e.fecha ?? "").slice(0, 10) === iso);
-  const palette = ["#4CC9A0", "#9B8FE8", "#EF9F27", "#E05555"];
-  return list.slice(0, 4).map((_, i) => palette[i % palette.length]);
-}
-
-function buildWeekDays(reference: Date, events: KoreAgendaEvent[]): WeekDay[] {
-  const d = new Date(reference);
-  const day = d.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const monday = new Date(d);
-  monday.setHours(12, 0, 0, 0);
-  monday.setDate(d.getDate() + mondayOffset);
-
-  const labels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
-  const todayKey = ymdParts(reference);
-
-  return labels.map((label, i) => {
-    const dt = new Date(monday);
-    dt.setDate(monday.getDate() + i);
-    const key = ymdParts(dt);
-    return {
-      key,
-      label,
-      num: dt.getDate(),
-      isToday: key === todayKey,
-      dots: dotsForDate(dt, events),
-      date: dt,
-    };
-  });
 }
 
 type DomainCard = {
@@ -227,11 +133,9 @@ const DOMAINS: DomainCard[] = BASE_DOMAINS.map((domain) => ({
 const CORCHO_MESSAGES: CorchoMessage[] = [];
 
 type CorchoMessage = {
+  id: string;
   who: string;
-  avatar: string;
-  ownerColor: string;
   text: string;
-  when: string;
 };
 
 type HomeClientProps = {
@@ -299,19 +203,12 @@ function mapHealthRowsToDynamicSalud(rows: HealthRecord[]): DynamicSaludData {
 function mapKoreNotesToCorchoMessages(rows: KoreNote[], profiles: Profile[]): CorchoMessage[] {
   const safeRows = rows ?? [];
   const safeProfiles = profiles ?? [];
-  const colorByIndex = ["#4CC9A0", "#9B8FE8", "#EF9F27", "#E05555"];
-  const indexByProfileId = new Map(safeProfiles.map((p, idx) => [p.id, idx]));
   return safeRows.slice(0, 3).map((r) => {
     const sender = safeProfiles.find((p) => p.id === r.sender_id) ?? null;
-    const who = sender?.name ?? "Desconocido";
-    const avatar = who.charAt(0).toUpperCase() || "?";
-    const colorIdx = indexByProfileId.get(sender?.id ?? "") ?? 0;
     return {
-      who,
-      avatar,
-      ownerColor: colorByIndex[colorIdx % colorByIndex.length],
-      text: r.content ?? "(nota sin texto)",
-      when: new Date(r.created_at ?? "").toLocaleString("es-ES"),
+      id: r.id,
+      who: sender?.name ?? "Desconocido",
+      text: honestCorchoText(r.content ?? "(nota sin texto)"),
     };
   });
 }
@@ -467,11 +364,9 @@ export function HomeClient({
   initialSchoolEvents = [],
 }: HomeClientProps) {
   const safeInitialProfiles = useMemo(() => initialProfiles ?? [], [initialProfiles]);
-  const [line1, line2] = familyName.split(/[-\/\s]/, 2);
+  const [tab, setTab] = useState<HomeTab>("inicio");
   const [showAgent, setShowAgent] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
-  const [showCorcho, setShowCorcho] = useState(false);
-  const [showCorchoHistorial, setShowCorchoHistorial] = useState(false);
   const [showEconomia, setShowEconomia] = useState(false);
   const [showSalud, setShowSalud] = useState(false);
   const [showSaludResumen, setShowSaludResumen] = useState(false);
@@ -490,11 +385,9 @@ export function HomeClient({
       .filter((row) => withinAgendaWindow((row.date ?? "").slice(0, 10)))
       .map(calendarRowToEvent),
   );
-  const [mounted, setMounted] = useState(false);
-  const booting = false;
 
-  const [domainsOpen, setDomainsOpen] = useState(true);
-  const [domainCardHover, setDomainCardHover] = useState<Record<string, boolean>>({});
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItemRow[]>(initialShoppingItems ?? []);
+  const [cleaningTasks, setCleaningTasks] = useState<CleaningTaskRow[]>(initialPendingCleaningTasks ?? []);
   const [domains, setDomains] = useState<DomainCard[]>(() => {
     const activeInitialDomains = (initialDomains ?? []).filter((row) => row.is_active === true);
     const mapped = activeInitialDomains.map((row) =>
@@ -520,7 +413,6 @@ export function HomeClient({
   );
   const [activeDomainName, setActiveDomainName] = useState<string | null>(null);
   const [domainHistoryList, setDomainHistoryList] = useState<DomainHistoryEntry[]>([]);
-  const [healthOpen, setHealthOpen] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseItem[]>(
     (initialExpenses ?? [])
       .map((row) => mapExpenseRowToItem(row, safeInitialProfiles))
@@ -651,24 +543,6 @@ export function HomeClient({
     }
   }, [pushSupported, safeInitialProfiles.length]);
 
-  const handleResetPush = useCallback(async () => {
-    if (!pushSupported) return;
-    setPushBusy(true);
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        await sub.unsubscribe();
-      }
-      await unsubscribeFromNotificationsAction();
-      setPushNotificationsActive(false);
-    } catch (err) {
-      console.error("[HomeClient] handleResetPush failed:", err);
-    } finally {
-      setPushBusy(false);
-    }
-  }, [pushSupported]);
-
   const corchoPartner = useMemo(
     () => resolvePartnerProfile(familyContext.adults, currentUserId),
     [familyContext.adults, currentUserId],
@@ -687,7 +561,7 @@ export function HomeClient({
 
   const loadDomains = useCallback(async () => {
     try {
-      const [rows, shoppingItems, cleaningTasks, weeklyMenu, sleepSessions, schoolEvents] = await Promise.all([
+      const [rows, shoppingRows, cleaningRows, weeklyMenu, sleepSessions, schoolEvents] = await Promise.all([
         getDomains(),
         getShoppingItems(),
         getPendingCleaningTasks(),
@@ -695,16 +569,18 @@ export function HomeClient({
         getSleepSessions(14),
         getSchoolEvents(),
       ]);
+      setShoppingItems(shoppingRows);
+      setCleaningTasks(cleaningRows);
       const activeRows = rows.filter((row) => row.is_active === true);
       const mapped = activeRows.map((row) =>
         enrichColegioDomain(
           enrichSuenoDomain(
             enrichLimpiezaDomain(
               enrichMenuDomain(
-                enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), shoppingItems),
+                enrichComprasDomainFromShoppingItems(mergedDomainCard(row, safeInitialProfiles), shoppingRows),
                 weeklyMenu,
               ),
-              cleaningTasks,
+              cleaningRows,
             ),
             sleepSessions,
             safeInitialProfiles,
@@ -871,10 +747,6 @@ export function HomeClient({
     });
   }, [loadAgenda]);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   useKoreRealtime(
     useCallback(
       (table) => {
@@ -937,8 +809,6 @@ export function HomeClient({
     };
   }, [activeDomainName, domains]);
 
-  const weekDays = useMemo(() => buildWeekDays(new Date(), agendaEvents), [agendaEvents]);
-  const agendaMonthYear = useMemo(() => formatMesAnioEs(new Date()), []);
   const activeDomain = useMemo(
     () => (activeDomainName ? domains.find((d) => d.name === activeDomainName) ?? null : null),
     [activeDomainName, domains],
@@ -1091,1244 +961,154 @@ export function HomeClient({
     return month ? `Balance ${month}` : "Economía";
   }, []);
 
-  const avatarBase: CSSProperties = {
-    width: 40,
-    height: 40,
-    borderRadius: "50%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 13,
-    fontWeight: 700,
-    color: C.text,
-    background: C.card,
-    borderWidth: 2,
-    borderStyle: "solid",
-    boxSizing: "border-box",
-  };
+  const homeDate = useMemo(() => formatHomeDate(new Date()), []);
+  const greeting = greetingFor(familyContext.currentUser?.name);
+  const todayAgenda = useMemo(() => buildTodayAgenda(agendaEvents, new Date()), [agendaEvents]);
+  const pending = useMemo(
+    () =>
+      buildPendingRows({
+        shopping: shoppingItems,
+        cleaning: cleaningTasks,
+        note: corchoMessages[0]
+          ? { id: corchoMessages[0].id, title: corchoMessages[0].text, subtitle: corchoMessages[0].who }
+          : null,
+      }),
+    [cleaningTasks, corchoMessages, shoppingItems],
+  );
 
-  const mobileShell: CSSProperties = {
-    width: "100%",
-    maxWidth: 390,
-    margin: "0 auto",
-    minHeight: "100vh",
-    maxHeight: "100vh",
-    background: "#090b10",
-    position: "relative",
-    overflow: "hidden",
-    transform: "translateZ(0)",
-    boxSizing: "border-box",
-    color: C.text,
-    display: "flex",
-    flexDirection: "column",
-  };
+  const openDomainByName = useCallback(
+    (name: string) => {
+      const found = domains.find((domain) => domain.name === name);
+      if (found) setActiveDomainName(found.name);
+      else setTab("casa");
+    },
+    [domains],
+  );
+
+  const handleOpenPending = useCallback(
+    (row: PendingRow) => {
+      if (row.kind === "shopping") openDomainByName("Compras");
+      else if (row.kind === "cleaning") openDomainByName("Limpieza");
+      else setTab("corcho");
+    },
+    [openDomainByName],
+  );
+
+  const handleCompletePending = useCallback(
+    async (row: PendingRow) => {
+      if (row.kind === "corcho") {
+        setTab("corcho");
+        return;
+      }
+      try {
+        if (row.kind === "shopping") {
+          setShoppingItems((prev) => prev.map((item) => (item.id === row.id ? { ...item, completed: true } : item)));
+          await completeShoppingItem(row.id);
+          emitKoreUpdate(["shopping_items"]);
+        } else {
+          setCleaningTasks((prev) => prev.filter((task) => task.id !== row.id));
+          await completeCleaningTask(row.id);
+          emitKoreUpdate(["cleaning_tasks"]);
+        }
+      } catch {
+        void loadDomains();
+      }
+    },
+    [loadDomains],
+  );
+
+  const openCurrentProfile = useCallback(() => {
+    const profile = familyContext.currentUser ?? familyContext.adults[0] ?? null;
+    if (!profile) return;
+    setUsuarioPerfil(profile);
+    setShowPerfil(true);
+  }, [familyContext.adults, familyContext.currentUser]);
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#06070a",
-        boxSizing: "border-box",
-      }}
-    >
-      <div
-        style={{
-          ...mobileShell,
-          opacity: mounted ? 1 : 0,
-          transition: "opacity 0.4s ease-in",
+    <div className="min-h-dvh bg-[#090b10] text-[#e4e6ed]">
+      <HomeHeader
+        familyName={familyName}
+        adults={familyContext.adults.slice(0, 2).map((profile) => ({ id: profile.id, name: profile.name }))}
+        onOpenProfile={(id) => {
+          const profile = safeInitialProfiles.find((item) => item.id === id);
+          if (!profile) return;
+          setUsuarioPerfil(profile);
+          setShowPerfil(true);
         }}
-      >
-      <header
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          width: "100%",
-          background: C.bg,
-          padding: "12px 14px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          borderBottom: "0.5px solid rgba(255, 255, 255, 0.07)",
-          zIndex: 300,
-          boxSizing: "border-box",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, minWidth: 0 }}>
-          <svg width="40" height="40" viewBox="0 0 160 160" fill="none" aria-hidden style={{ flexShrink: 0 }}>
-            <rect width="160" height="160" rx="36" fill="#0b0d13" />
-            <circle cx="68" cy="80" r="36" stroke="#4CC9A0" strokeWidth="1.8" fill="none" />
-            <circle cx="96" cy="80" r="36" stroke="#9B8FE8" strokeWidth="1.8" fill="none" />
-            <circle cx="82" cy="80" r="7" fill="white" opacity="0.95" />
-            <circle cx="82" cy="80" r="14" fill="white" opacity="0.05" />
-          </svg>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 26,
-              fontWeight: 700,
-              color: "#e4e6ed",
-              lineHeight: 1.1,
+      />
+      <main className="mx-auto w-full max-w-6xl px-5 pt-20 pb-8 md:px-8">
+        {tab === "inicio" ? (
+          <InicioView
+            greeting={greeting}
+            dateLong={homeDate.long}
+            dateShort={homeDate.short}
+            agenda={todayAgenda}
+            pendingMobile={pending.mobile}
+            pendingDesktop={pending.desktop}
+            domains={domains}
+            showInvite={showPartnerInviteWidget}
+            inviteCode={initialInviteCode}
+            inviteCopied={inviteCopied}
+            onCopyInvite={() => void handleCopyInviteCode()}
+            onOpenCalendar={() => {
+              setCalendarInitialDate(new Date());
+              setShowCalendar(true);
             }}
-          >
-            Kore
-          </p>
-        </div>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: "0 4px",
-            gap: 2,
-          }}
-        >
-          {familyName ? (
-            <>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 9,
-                  fontFamily: "ui-monospace, monospace",
-                  color: "rgba(228, 230, 237, 0.45)",
-                  letterSpacing: "2px",
-                  textAlign: "center",
-                  textTransform: "uppercase",
-                  lineHeight: 1.2,
-                }}
-              >
-                {line1 ?? ""}
-              </p>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 9,
-                  fontFamily: "ui-monospace, monospace",
-                  color: "rgba(228, 230, 237, 0.45)",
-                  letterSpacing: "2px",
-                  textAlign: "center",
-                  textTransform: "uppercase",
-                  lineHeight: 1.2,
-                }}
-              >
-                {line2 ?? ""}
-              </p>
-            </>
-          ) : null}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, position: "relative", gap: 8 }}>
-          {pushSupported && safeInitialProfiles.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-              {!pushNotificationsActive ? (
-                <button
-                  type="button"
-                  onClick={() => void handlePushToggle()}
-                  disabled={pushBusy}
-                  aria-label="Activar notificaciones push"
-                  title="Activar notificaciones push"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: C.muted,
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 8,
-                    padding: "6px 9px",
-                    cursor: pushBusy ? "wait" : "pointer",
-                    whiteSpace: "nowrap",
-                    opacity: pushBusy ? 0.65 : 1,
-                  }}
-                >
-                  🔔 Notificaciones
-                </button>
-              ) : null}
-              {pushNotificationsActive ? (
-                <button
-                  type="button"
-                  onClick={() => void handleResetPush()}
-                  disabled={pushBusy}
-                  aria-label="Reactivar notificaciones push (debug)"
-                  title="Desuscribir y volver a activar (temporal debug)"
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 600,
-                    color: C.muted,
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px dashed rgba(255,255,255,0.15)",
-                    borderRadius: 6,
-                    padding: "4px 7px",
-                    cursor: pushBusy ? "wait" : "pointer",
-                    whiteSpace: "nowrap",
-                    opacity: pushBusy ? 0.65 : 1,
-                  }}
-                >
-                  🔄 Reactivar
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          {showAdminLink ? (
-            <Link
-              href="/admin"
-              aria-label="Panel de administración"
-              title="Admin"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                color: "rgba(228,230,237,0.35)",
-                fontSize: 14,
-                lineHeight: 1,
-                textDecoration: "none",
-                flexShrink: 0,
-              }}
-            >
-              ⚙️
-            </Link>
-          ) : null}
-          {familyContext.adults.slice(0, 2).map((profile, index) => {
-            const stress = stressByProfileId[profile.id] ?? 5;
-            return (
-              <button
-                key={profile.id}
-                type="button"
-                aria-label={`Perfil de ${profile.name}`}
-                onClick={() => {
-                  setUsuarioPerfil(profile);
-                  setShowPerfil(true);
-                }}
-                style={{
-                  ...avatarBase,
-                  position: "relative",
-                  zIndex: index + 1,
-                  borderColor: avatarStressBorder(stress),
-                  boxShadow: avatarStressShadow(stress),
-                  marginLeft: index === 0 ? 0 : -10,
-                  cursor: "pointer",
-                  padding: 0,
-                  font: "inherit",
-                }}
-              >
-                {profile.name.charAt(0).toUpperCase()}
-              </button>
-            );
-          })}
-        </div>
-      </header>
-
-      <main
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          width: "100%",
-          margin: 0,
-          paddingTop: 96,
-          paddingBottom: 120,
-          boxSizing: "border-box",
-        }}
-      >
-        {showPartnerInviteWidget ? (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              maxHeight: 40,
-              margin: "0 16px 6px",
-              padding: "4px 4px 6px",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "nowrap",
-              boxSizing: "border-box",
-              overflow: "hidden",
-              background: "transparent",
-              borderBottom: "0.5px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <span
-              style={{
-                fontSize: 11,
-                lineHeight: 1.2,
-                color: C.muted,
-                fontFamily: "var(--font-dm-sans), sans-serif",
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-              }}
-            >
-              Invita a tu pareja:
-            </span>
-            <code
-              style={{
-                fontSize: 12,
-                lineHeight: 1.2,
-                fontWeight: 600,
-                letterSpacing: "0.05em",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                color: C.green,
-                minWidth: 0,
-                flex: 1,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {(initialInviteCode ?? "").trim()}
-            </code>
-            <button
-              type="button"
-              onClick={() => void handleCopyInviteCode()}
-              title={inviteCopied ? "Copiado" : "Copiar código"}
-              aria-label={inviteCopied ? "Código copiado" : "Copiar código de invitación"}
-              style={{
-                flexShrink: 0,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                height: 28,
-                minWidth: 28,
-                padding: "0 6px",
-                borderRadius: 6,
-                border: "0.5px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.04)",
-                color: inviteCopied ? C.green : "rgba(228,230,237,0.75)",
-                fontSize: 10,
-                fontWeight: 600,
-                fontFamily: "var(--font-dm-sans), sans-serif",
-                cursor: "pointer",
-                lineHeight: 1,
-              }}
-            >
-              {inviteCopied ? (
-                "✓"
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M8 5.5V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-2M8 5.5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2M8 5.5h8a2 2 0 0 1 2 2v2"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              )}
-            </button>
+            onComplete={(row) => void handleCompletePending(row)}
+            onOpenPending={handleOpenPending}
+            onOpenCasa={() => setTab("casa")}
+            onOpenDomain={openDomainByName}
+            onDeactivateDomain={(id) => void handleDeactivateCorner(id)}
+          />
+        ) : null}
+        {tab === "casa" ? (
+          <CasaView
+            domains={domains}
+            onOpenDomain={openDomainByName}
+            onDeactivateDomain={(id) => void handleDeactivateCorner(id)}
+            onAddCorner={openAddCornerModal}
+            onOpenSalud={() => setShowSalud(true)}
+            onOpenSaludResumen={() => setShowSaludResumen(true)}
+            saludPendientes={saludPendientes}
+            members={[...familyContext.children, ...familyContext.adults].map((member) => ({
+              id: member.id,
+              name: member.name,
+              role: member.role ?? "",
+            }))}
+            salud={salud}
+            onOpenEconomia={() => setShowEconomia(true)}
+            economiaTitle={economiaCardTitle}
+            totalMes={economia.totalMes}
+            debtByAdult={economia.debtByAdult}
+            adults={familyContext.adults.map((adult) => ({ id: adult.id, name: adult.name }))}
+            expenses={expenses}
+          />
+        ) : null}
+        {tab === "corcho" ? (
+          <div className="flex h-[calc(100dvh-9.5rem)] min-h-[420px] flex-col overflow-hidden rounded-2xl border border-white/[0.07]">
+            <CorchoChat
+              embedded
+              onClose={() => setTab("inicio")}
+              currentUserId={currentUserId}
+              partnerUserId={corchoPartner?.id ?? ""}
+              recipientName={corchoPartner?.name ?? "tu pareja"}
+            />
           </div>
         ) : null}
-
-        {/* Agenda */}
-        <section>
-          <p style={{ ...sectionLabel }}>Agenda familiar</p>
-          <div
-            style={{
-              margin: 0,
-              padding: "0 20px",
-              marginBottom: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-            }}
-          >
-            <p
-              style={{
-                margin: 0,
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#e4e6ed",
-                minWidth: 0,
-              }}
-            >
-              {booting ? (
-                <span style={{ display: "inline-block", width: 110, height: 12, borderRadius: 999, background: SKEL.bg }} />
-              ) : (
-                agendaMonthYear
-              )}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setCalendarInitialDate(null);
-                setShowCalendar(true);
-              }}
-              style={{
-                margin: 0,
-                padding: 0,
-                border: "none",
-                background: "transparent",
-                fontSize: "11px",
-                color: "rgba(76,201,160,0.6)",
-                fontFamily: "monospace",
-                letterSpacing: "1px",
-                cursor: "pointer",
-                flexShrink: 0,
-                whiteSpace: "nowrap",
-              }}
-            >
-              Ver calendario →
-            </button>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              overflowX: "auto",
-              padding: "0 16px",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
-            {weekDays.map((day) => (
-              <button
-                key={day.key}
-                type="button"
-                aria-current={day.isToday ? "date" : undefined}
-                onClick={() => {
-                  setCalendarInitialDate(day.date);
-                  setShowCalendar(true);
-                }}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 8,
-                    background: booting ? "#161a22" : day.isToday ? "rgba(76, 201, 160, 0.12)" : "#161a22",
-                    border: booting
-                      ? "0.5px solid rgba(255, 255, 255, 0.07)"
-                      : day.isToday
-                        ? "1.5px solid rgba(76, 201, 160, 0.55)"
-                        : "0.5px solid rgba(255, 255, 255, 0.07)",
-                  borderRadius: 12,
-                  padding: "10px 12px",
-                  minWidth: 65,
-                  flexShrink: 0,
-                  boxSizing: "border-box",
-                  cursor: "pointer",
-                  color: "inherit",
-                  font: "inherit",
-                    boxShadow: booting ? undefined : day.isToday ? "0 0 16px rgba(76, 201, 160, 0.2)" : undefined,
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "ui-monospace, monospace",
-                    fontSize: 11,
-                    fontWeight: day.isToday ? 700 : 500,
-                    letterSpacing: "0.02em",
-                    color: day.isToday ? C.green : C.muted,
-                  }}
-                >
-                  {booting ? (
-                    <span style={{ display: "inline-block", width: 26, height: 9, borderRadius: 999, background: SKEL.bg }} />
-                  ) : (
-                    day.label
-                  )}
-                </span>
-                <span
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 700,
-                    color: day.isToday ? C.green : C.text,
-                  }}
-                >
-                  {booting ? (
-                    <span style={{ display: "inline-block", width: 18, height: 18, borderRadius: 6, background: SKEL.bg }} />
-                  ) : (
-                    day.num
-                  )}
-                </span>
-                <div
-                  style={{
-                    minHeight: 14,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {!booting && day.isToday ? (
-                    <span
-                      style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        fontFamily: "ui-monospace, monospace",
-                        letterSpacing: "0.12em",
-                        textTransform: "uppercase",
-                        color: C.green,
-                      }}
-                    >
-                      Hoy
-                    </span>
-                  ) : null}
-                </div>
-                <div style={{ display: "flex", height: 8, alignItems: "center", gap: 4 }}>
-                  {booting
-                    ? Array.from({ length: 3 }).map((_, i) => (
-                        <span
-                          key={i}
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: "50%",
-                            backgroundColor: SKEL.fg,
-                          }}
-                        />
-                      ))
-                    : day.dots.map((c, i) => (
-                        <span
-                          key={i}
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: "50%",
-                            backgroundColor: c,
-                          }}
-                        />
-                      ))}
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Nuestro hogar (dominios) */}
-        <section style={cardShell}>
-          <button
-            type="button"
-            onClick={() => setDomainsOpen((o) => !o)}
-            style={{
-              display: "flex",
-              width: "100%",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              textAlign: "left",
-              background: "none",
-              border: "none",
-              padding: 0,
-              cursor: "pointer",
-              color: C.text,
-            }}
-          >
-            <span style={{ ...sectionLabel, margin: 0 }}>Nuestro hogar</span>
-            <span
-              style={{
-                color: C.muted,
-                display: "inline-block",
-                transform: domainsOpen ? "rotate(180deg)" : "rotate(0deg)",
-              }}
-              aria-hidden
-            >
-              ▼
-            </span>
-          </button>
-          {domainsOpen ? (
-            <div style={{ marginTop: 14 }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                }}
-              >
-                {domains.map((d) => {
-                  const domHover = domainCardHover[d.name] ?? false;
-                  return (
-                  <div
-                    key={d.id || d.name}
-                    style={{
-                      position: "relative",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setActiveDomainName(d.name)}
-                      onMouseEnter={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
-                      onMouseLeave={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
-                      onTouchStart={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: true }))}
-                      onTouchEnd={() => setDomainCardHover((prev) => ({ ...prev, [d.name]: false }))}
-                      style={{
-                        position: "relative",
-                        overflow: "hidden",
-                        background: "#161a22",
-                        borderRadius: 14,
-                        padding: 12,
-                        border: domHover
-                          ? "0.5px solid rgba(255, 255, 255, 0.2)"
-                          : "0.5px solid rgba(255, 255, 255, 0.07)",
-                        boxSizing: "border-box",
-                        textAlign: "left",
-                        color: C.text,
-                        cursor: "pointer",
-                        font: "inherit",
-                        transform: domHover ? "scale(1.03) translateY(-3px)" : "scale(1) translateY(0)",
-                        transition: "all 0.2s ease",
-                        width: "100%",
-                      }}
-                    >
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          height: 2,
-                          backgroundColor: d.line,
-                        }}
-                      />
-                      <div style={{ paddingTop: 6 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            justifyContent: "space-between",
-                            gap: 4,
-                            marginBottom: 8,
-                          }}
-                        >
-                          {booting ? (
-                            <span style={{ display: "inline-block", width: 18, height: 18, borderRadius: "50%", background: SKEL.bg }} />
-                          ) : (
-                            <span style={{ fontSize: 18, lineHeight: 1 }}>{d.emoji}</span>
-                          )}
-                          <span
-                            style={{
-                              borderRadius: 999,
-                              border: "0.5px solid rgba(255,255,255,0.1)",
-                              background: "rgba(255,255,255,0.04)",
-                              padding: "2px 8px",
-                              fontSize: 10,
-                              color: C.muted,
-                            }}
-                          >
-                            {booting ? (
-                              <span style={{ display: "inline-block", width: 46, height: 8, borderRadius: 999, background: SKEL.bg }} />
-                            ) : (
-                              d.owner
-                            )}
-                          </span>
-                        </div>
-                        <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: C.text }}>
-                          {booting ? <span style={{ display: "inline-block", width: "70%", height: 12, borderRadius: 999, background: SKEL.bg }} /> : d.name}
-                        </p>
-                        <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
-                          {booting ? <span style={{ display: "inline-block", width: "55%", height: 10, borderRadius: 999, background: SKEL.bg }} /> : d.state}
-                        </p>
-                        {d.notes && d.notes.length > 0 ? (
-                          <p
-                            style={{
-                              margin: "4px 0 0",
-                              fontSize: 11,
-                              color: C.muted,
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                          >
-                            {d.notes[d.notes.length - 1]}
-                          </p>
-                        ) : null}
-                        {d.agent ? (
-                          <p
-                            style={{
-                              margin: "4px 0 0",
-                              fontSize: 9,
-                              fontFamily: "ui-monospace, monospace",
-                              color: "rgba(228,230,237,0.35)",
-                              letterSpacing: "0.04em",
-                            }}
-                          >
-                            Agent: {d.agent}
-                          </p>
-                        ) : null}
-                        <div
-                          style={{
-                            marginTop: 12,
-                            height: 6,
-                            overflow: "hidden",
-                            borderRadius: 999,
-                            background: "rgba(255,255,255,0.08)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              height: "100%",
-                              borderRadius: 999,
-                              background: d.line,
-                              width: `${(d.weight / 15) * 100}%`,
-                            }}
-                          />
-                        </div>
-                        <p
-                          style={{
-                            margin: "6px 0 0",
-                            textAlign: "right",
-                            fontFamily: "ui-monospace, monospace",
-                            fontSize: 10,
-                            color: C.muted,
-                          }}
-                        >
-                          {booting ? <span style={{ display: "inline-block", width: 38, height: 10, borderRadius: 999, background: SKEL.bg }} /> : `${d.weight}/15`}
-                        </p>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDeactivateCorner(d.id)}
-                      aria-label={`Desactivar ${d.name}`}
-                      title="Desactivar rincón"
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        background: "rgba(9,11,16,0.65)",
-                        color: "rgba(228,230,237,0.75)",
-                        fontSize: 12,
-                        lineHeight: 1,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                        zIndex: 2,
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={openAddCornerModal}
-                  style={{
-                    borderRadius: 14,
-                    border: "1px dashed rgba(255, 255, 255, 0.22)",
-                    background: "rgba(255,255,255,0.02)",
-                    minHeight: 140,
-                    padding: 12,
-                    color: C.text,
-                    cursor: "pointer",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    font: "inherit",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: "50%",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      border: "1px solid rgba(76, 201, 160, 0.5)",
-                      background: "rgba(76, 201, 160, 0.15)",
-                      color: C.green,
-                      fontSize: 18,
-                      fontWeight: 700,
-                      lineHeight: 1,
-                    }}
-                    aria-hidden
-                  >
-                    +
-                  </span>
-                  <span style={{ fontSize: 13, color: C.muted, fontWeight: 600 }}>Más rincones</span>
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </section>
-
-        {/* Salud */}
-        <section
-          style={{
-            ...cardShell,
-            padding: 0,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              width: "100%",
-              alignItems: "center",
-              gap: 12,
-              padding: 14,
-              textAlign: "left",
-              color: C.text,
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setShowSalud(true)}
-              style={{
-                display: "flex",
-                flex: 1,
-                minWidth: 0,
-                alignItems: "center",
-                gap: 12,
-                background: "none",
-                border: "none",
-                color: "inherit",
-                textAlign: "left",
-                cursor: "pointer",
-                padding: 0,
-                font: "inherit",
-              }}
-            >
-              <span style={{ fontSize: 24 }} aria-hidden>
-                🏥
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>Salud familiar</p>
-                <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>Citas y medicación</p>
-              </div>
-            </button>
-            <span
-              style={{
-                borderRadius: 999,
-                background: "rgba(239, 159, 39, 0.2)",
-                padding: "4px 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                color: C.amber,
-                flexShrink: 0,
-              }}
-            >
-              {booting ? <span style={{ display: "inline-block", width: 40, height: 10, borderRadius: 999, background: SKEL.bg }} /> : saludPendientes} pendientes
-            </span>
-            <button
-              type="button"
-              onClick={() => setHealthOpen((o) => !o)}
-              aria-label={healthOpen ? "Contraer salud" : "Expandir salud"}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: C.muted,
-                cursor: "pointer",
-                padding: 0,
-                fontSize: 14,
-                lineHeight: 1,
-              }}
-            >
-              {healthOpen ? "▼" : "▶"}
-            </button>
-          </div>
-
-          {healthOpen ? (
-            <div
-              style={{
-                borderTop: "0.5px solid rgba(255,255,255,0.07)",
-                padding: "12px 14px 16px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-              }}
-            >
-              {[...familyContext.children, ...familyContext.adults].map((member) => {
-                const memberHealth = salud[member.id] ?? emptyHealthMember();
-                const citas = memberHealth.citas;
-                const meds = memberHealth.medicaciones;
-                return (
-                  <div
-                    key={member.id}
-                    onClick={() => setShowSaludResumen(true)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <p
-                      style={{
-                        margin: "0 0 8px",
-                        fontSize: 11,
-                        fontWeight: 700,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.06em",
-                        color: member.role === "child" ? C.green : C.muted,
-                      }}
-                    >
-                      {member.name}
-                    </p>
-                    {citas.length === 0 && meds.length === 0 ? (
-                      <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Sin registros</p>
-                    ) : (
-                      <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
-                        {citas.map((c) => (
-                          <li
-                            key={c.id}
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              gap: 8,
-                              borderLeft: `2px solid ${C.purple}`,
-                              paddingLeft: 8,
-                              fontSize: 13,
-                              color: C.text,
-                            }}
-                          >
-                            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {c.fecha} {c.hora} · {c.descripcion}
-                            </span>
-                          </li>
-                        ))}
-                        {meds.map((m) => {
-                          return (
-                            <li
-                              key={m.id}
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                gap: 8,
-                                borderLeft: `2px solid ${C.green}`,
-                                paddingLeft: 8,
-                                fontSize: 13,
-                                color: C.text,
-                              }}
-                            >
-                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {m.fecha} {m.hora} · {m.descripcion}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-        </section>
-
-        {/* El corcho */}
-        <section>
-          <p style={{ ...sectionLabel }}>El corcho</p>
-          <button
-            type="button"
-            onClick={() => {
-              setShowAgent(false);
-              setShowCorcho(false);
-              setShowCorchoHistorial(true);
-            }}
-            style={{
-              width: "calc(100% - 32px)",
-              margin: "0 16px 16px",
-              padding: 0,
-              border: "none",
-              background: "transparent",
-              textAlign: "left",
-              cursor: "pointer",
-              color: C.text,
-              font: "inherit",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {booting
-                ? Array.from({ length: 3 }).map((_, idx) => (
-                    <div
-                      // eslint-disable-next-line react/no-array-index-key
-                      key={idx}
-                      style={{
-                        background: "#161a22",
-                        border: "0.5px solid rgba(255,255,255,0.07)",
-                        borderRadius: 10,
-                        padding: "8px 12px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      <div
-                        style={{
-                          ...avatarBase,
-                          width: 30,
-                          height: 30,
-                          fontSize: 11,
-                          flexShrink: 0,
-                          borderColor: SKEL.line,
-                          background: SKEL.bg,
-                        }}
-                      />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ height: 10, width: "45%", borderRadius: 999, background: SKEL.bg }} />
-                        <div style={{ marginTop: 6, height: 9, width: "92%", borderRadius: 8, background: SKEL.bg }} />
-                        <div style={{ marginTop: 4, height: 9, width: "62%", borderRadius: 8, background: SKEL.bg }} />
-                      </div>
-                    </div>
-                  ))
-                : corchoMessages.slice(0, 3).map((msg, idx) => (
-                    <div
-                      key={`${msg.who}-${idx}`}
-                      style={{
-                        background: "#161a22",
-                        border: "0.5px solid rgba(255,255,255,0.07)",
-                        borderRadius: 10,
-                        padding: "8px 12px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      <div
-                        style={{
-                          ...avatarBase,
-                          width: 30,
-                          height: 30,
-                          fontSize: 11,
-                          flexShrink: 0,
-                          borderColor: msg.ownerColor,
-                          background: "#12151c",
-                        }}
-                      >
-                        {msg.avatar}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: 0, fontWeight: 600, color: C.text, fontSize: 11 }}>{msg.who}</p>
-                        <p style={{ margin: "3px 0 0", fontSize: 11, color: C.text, opacity: 0.95 }}>{msg.text}</p>
-                        <p style={{ margin: "3px 0 0", fontSize: 11, color: C.muted }}>{msg.when}</p>
-                      </div>
-                    </div>
-                  ))}
-            </div>
-            <p style={{ margin: "8px 4px 0", fontSize: 11, color: "var(--muted)" }}>Ver historial completo →</p>
-          </button>
-        </section>
-
-        {/* Economía */}
-        <button
-          type="button"
-          onClick={() => setShowEconomia(true)}
-          style={{
-            ...cardShell,
-            display: "block",
-            width: "calc(100% - 32px)",
-            marginBottom: 120,
-            textAlign: "left",
-            cursor: "pointer",
-            color: C.text,
-            font: "inherit",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-            <span style={{ fontSize: 22 }} aria-hidden>
-              💶
-            </span>
-            <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{economiaCardTitle}</p>
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 12,
-              marginBottom: 16,
-            }}
-          >
-            <div
-              style={{
-                borderRadius: 12,
-                background: "rgba(255,255,255,0.04)",
-                padding: 12,
-                border: "0.5px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 10,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: C.muted,
-                }}
-              >
-                Gastos mes
-              </p>
-              <p style={{ margin: "8px 0 0", fontSize: 18, fontWeight: 700, color: C.red }}>
-                {booting ? (
-                  <span style={{ display: "inline-block", width: 100, height: 12, borderRadius: 999, background: SKEL.bg }} />
-                ) : (
-                  `${economia.totalMes.toFixed(2).replace(".", ",")}€`
-                )}
-              </p>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "center",
-                gap: 10,
-                borderRadius: 12,
-                background: "rgba(255,255,255,0.04)",
-                padding: 12,
-                border: "0.5px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              {familyContext.adults.map((adult) => (
-                <div key={adult.id}>
-                  <p
-                    style={{
-                      margin: 0,
-                      fontSize: 10,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      color: C.muted,
-                    }}
-                  >
-                    Debe {adult.name}
-                  </p>
-                  <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700, color: C.green }}>
-                    {booting ? (
-                      <span style={{ display: "inline-block", width: 86, height: 12, borderRadius: 999, background: SKEL.bg }} />
-                    ) : (
-                      `${(economia.debtByAdult[adult.id] ?? 0).toFixed(2).replace(".", ",")}€`
-                    )}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
-            {booting
-              ? Array.from({ length: 3 }).map((_, idx) => (
-                  <li
-                    // eslint-disable-next-line react/no-array-index-key
-                    key={idx}
-                    style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 14 }}
-                  >
-                    <span style={{ width: 20, height: 20, borderRadius: 6, background: SKEL.bg }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ height: 12, width: "78%", borderRadius: 999, background: SKEL.bg }} />
-                      <div style={{ marginTop: 6, height: 9, width: "55%", borderRadius: 8, background: SKEL.bg }} />
-                    </div>
-                    <div style={{ width: 60, height: 12, borderRadius: 999, background: SKEL.bg }} />
-                  </li>
-                ))
-              : expenses.slice(0, 3).map((e) => (
-                  <li key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 14 }}>
-                    <span style={{ fontSize: 20 }}>{e.category === "comida" ? "🍽️" : e.category === "hogar" ? "🏠" : e.category === "salud" ? "🏥" : e.category === "ocio" ? "🎯" : e.category === "transporte" ? "🚗" : "🧾"}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontWeight: 600,
-                          color: C.text,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {e.desc}
-                      </p>
-                      <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
-                        {new Date(e.at).toLocaleDateString("es-ES")}
-                      </p>
-                    </div>
-                    <span style={{ flexShrink: 0, fontFamily: "ui-monospace, monospace", color: C.red }}>
-                      -{Math.abs(e.amount).toFixed(2).replace(".", ",")}€
-                    </span>
-                  </li>
-                ))}
-          </ul>
-        </button>
+        {tab === "yo" ? (
+          <YoView
+            name={familyContext.currentUser?.name ?? ""}
+            onOpenProfile={openCurrentProfile}
+            onOpenAgent={() => setShowAgent(true)}
+            pushSupported={pushSupported && safeInitialProfiles.length > 0}
+            pushActive={pushNotificationsActive}
+            pushBusy={pushBusy}
+            onEnablePush={() => void handlePushToggle()}
+            showAdmin={showAdminLink}
+          />
+        ) : null}
       </main>
-
-      <nav
-        style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          width: "100%",
-          background: "linear-gradient(to top, #090b10 75%, transparent)",
-          padding: "14px 40px 34px",
-          display: "flex",
-          justifyContent: "center",
-          gap: 20,
-          zIndex: 400,
-          boxSizing: "border-box",
-          pointerEvents: "auto",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setShowAgent(false);
-            setShowCorchoHistorial(false);
-            setShowCorcho(true);
-          }}
-          aria-label="Mensajes familiares"
-          style={{
-            width: 52,
-            height: 52,
-            borderRadius: "50%",
-            background: "#161a22",
-            border: "1px solid rgba(255, 255, 255, 0.13)",
-            fontSize: 22,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
-            lineHeight: 1,
-          }}
-        >
-          💬
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setShowCorcho(false);
-            setShowCorchoHistorial(false);
-            setShowAgent(true);
-          }}
-          aria-label="Kore / Agente"
-          style={{
-            width: 66,
-            height: 66,
-            borderRadius: "50%",
-            background: "#4CC9A0",
-            color: "#0a1a14",
-            fontSize: 22,
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
-            lineHeight: 1,
-          }}
-        >
-          ✦
-        </button>
-      </nav>
-
-      {showCorcho ? (
-        <CorchoChat
-          onClose={() => setShowCorcho(false)}
-          currentUserId={currentUserId}
-          partnerUserId={corchoPartner?.id ?? ""}
-          recipientName={corchoPartner?.name ?? "tu pareja"}
-        />
-      ) : null}
-      {showCorchoHistorial ? (
-        <CorchoHistorial
-          onClose={() => setShowCorchoHistorial(false)}
-          currentUserId={currentUserId}
-          profiles={safeInitialProfiles}
-        />
-      ) : null}
+      <HomeTabBar tab={tab} onChange={setTab} onOpenAgent={() => setShowAgent(true)} />
       {showAgent && currentUserId ? (
         <AgentChat onClose={handleCloseAgentChat} currentUserId={currentUserId} />
       ) : null}
@@ -2572,7 +1352,6 @@ export function HomeClient({
           </div>
         </div>
       ) : null}
-      </div>
     </div>
   );
 }
