@@ -120,7 +120,7 @@ export function buildPendingRows(input: {
     if (item.completed) continue;
     const title = item.name.trim();
     if (!title) continue;
-    tasks.push({ id: item.id, kind: "shopping", title, subtitle: "Compras" });
+    tasks.push({ id: item.id, kind: "shopping", title, subtitle: "Compra" });
   }
 
   for (const task of input.cleaning) {
@@ -129,7 +129,7 @@ export function buildPendingRows(input: {
     const label = task.task.trim();
     const title = zone || label;
     if (!title) continue;
-    tasks.push({ id: task.id, kind: "cleaning", title, subtitle: "Limpieza" });
+    tasks.push({ id: task.id, kind: "cleaning", title, subtitle: "Limpieza · hoy" });
   }
 
   const note = input.note?.title.trim()

@@ -1,5 +1,9 @@
-import { ChevronRight } from "lucide-react";
+"use client";
+
+import { ChevronRight, Plus } from "lucide-react";
+import { useState } from "react";
 import type { AgendaRow, PendingRow } from "@/components/home/home-model";
+import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 export type InicioDomain = {
   id: string;
@@ -12,6 +16,8 @@ export type InicioDomain = {
   agent?: string;
   notes?: string[];
 };
+
+export type PendingAddKind = "shopping" | "cleaning";
 
 type InicioViewProps = {
   greeting: string;
@@ -26,6 +32,8 @@ type InicioViewProps = {
   inviteCopied?: boolean;
   onCopyInvite?: () => void;
   onOpenCalendar: () => void;
+  onAddAgenda: () => void;
+  onAddPending: (kind: PendingAddKind) => void;
   onComplete: (row: PendingRow) => void;
   onOpenPending: (row: PendingRow) => void;
   onOpenCasa: () => void;
@@ -33,11 +41,7 @@ type InicioViewProps = {
   onDeactivateDomain: (id: string) => void;
 };
 
-const PENDING_EMOJI: Record<PendingRow["kind"], string> = {
-  shopping: "🛒",
-  cleaning: "🧹",
-  corcho: "💬",
-};
+const SURFACE = "rounded-2xl border border-white/[0.08] bg-[#1c1f27]";
 
 export function InicioView({
   greeting,
@@ -52,12 +56,15 @@ export function InicioView({
   inviteCopied = false,
   onCopyInvite,
   onOpenCalendar,
+  onAddAgenda,
+  onAddPending,
   onComplete,
   onOpenPending,
   onOpenCasa,
   onOpenDomain,
   onDeactivateDomain,
 }: InicioViewProps) {
+  const [pendingChooser, setPendingChooser] = useState(false);
   const visibleAgenda = agenda.slice(0, 4);
   const rincones = domains.slice(0, 4);
 
@@ -91,107 +98,88 @@ export function InicioView({
           </span>
         </p>
 
-        <section className="mt-8 lg:hidden" aria-label="Agenda">
-          <h2 className="text-[15px] font-medium text-white/80">Agenda</h2>
-          {visibleAgenda.length === 0 ? (
-            <p className="mt-3 text-sm text-white/40">Sin eventos hoy</p>
-          ) : (
-            <ul className="mt-2">
-              {visibleAgenda.map((row) => (
-                <li key={row.id} className="border-b border-white/[0.06]">
-                  <button
-                    type="button"
-                    onClick={onOpenCalendar}
-                    className="flex w-full items-center gap-3 py-3 text-left"
-                  >
-                    <span
-                      className={`h-7 w-1 rounded-full ${row.highlight ? "bg-[#4CC9A0]" : "bg-transparent"}`}
-                      aria-hidden
-                    />
-                    <span className={`w-12 shrink-0 text-sm ${row.highlight ? "text-[#4CC9A0]" : "text-white/45"}`}>
-                      {row.time}
-                    </span>
-                    <span className="min-w-0 truncate text-[15px] text-[#e4e6ed]">{row.title}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <button type="button" onClick={onOpenCalendar} className="mt-3 text-sm text-white/40">
-            Ver semana
-          </button>
-        </section>
-
-        <section className="mt-8 lg:hidden" aria-label="Pendiente">
-          <h2 className="text-[15px] font-medium text-white/80">Pendiente</h2>
-          {pendingMobile.length === 0 ? (
-            <p className="mt-3 text-sm text-white/40">Nada pendiente</p>
-          ) : (
-            <ul className="mt-2">
-              {pendingMobile.map((row) => (
-                <li key={`${row.kind}-${row.id}`}>
-                  <button
-                    type="button"
-                    onClick={() => onComplete(row)}
-                    className="flex w-full items-center gap-3 py-2.5 text-left"
-                    aria-label={`Marcar como hecho: ${row.title}`}
-                  >
-                    <span className="h-[18px] w-[18px] shrink-0 rounded-full border border-white/30" aria-hidden />
-                    <span className="min-w-0 truncate text-[15px] text-[#e4e6ed]">{row.title}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <button type="button" onClick={onOpenCasa} className="mt-8 text-[15px] text-[#e4e6ed] lg:hidden">
-          Ver rincones
-        </button>
-
-        <div className="mt-8 hidden flex-col gap-4 lg:flex">
-          <article className="rounded-2xl border border-white/[0.07] bg-[#161a22] px-4 py-4">
-            <h2 className="text-[15px] font-semibold text-white">Agenda de hoy</h2>
+        <div className="mt-6 flex flex-col gap-3.5">
+          <section className={`${SURFACE} px-4 py-4`} aria-label="Agenda">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-[15px] font-medium text-white">Agenda</h2>
+              <AddButton label="Añadir a la agenda" onClick={onAddAgenda} />
+            </div>
             {visibleAgenda.length === 0 ? (
-              <p className="mt-4 text-sm text-white/40">Sin eventos hoy</p>
+              <p className="mt-4 text-sm leading-6 text-white/45">
+                Sin eventos hoy.
+                <br />
+                Toca Añadir para el primero de la semana.
+              </p>
             ) : (
-              <ul className="mt-3">
+              <ul className="mt-2">
                 {visibleAgenda.map((row) => (
-                  <li key={row.id}>
+                  <li key={row.id} className="border-b border-white/[0.06] last:border-b-0">
                     <button
                       type="button"
                       onClick={onOpenCalendar}
-                      className="flex w-full items-center gap-3 py-2.5 text-left"
+                      className="flex w-full items-center gap-3 py-3 text-left"
                     >
-                      <span className={`w-1 self-stretch rounded-full ${row.highlight ? "bg-[#4CC9A0]" : "bg-white/10"}`} />
-                      <span className={`w-12 text-sm ${row.highlight ? "text-[#4CC9A0]" : "text-white/55"}`}>{row.time}</span>
-                      <span className="min-w-0 truncate text-sm text-[#e4e6ed]">{row.title}</span>
+                      <span
+                        className={`h-7 w-1 rounded-full ${row.highlight ? "bg-[#4CC9A0]" : "bg-white/10"}`}
+                        aria-hidden
+                      />
+                      <span className={`w-12 shrink-0 text-sm ${row.highlight ? "text-[#4CC9A0]" : "text-white/45"}`}>
+                        {row.time}
+                      </span>
+                      <span className="min-w-0 truncate text-[15px] text-[#e4e6ed]">{row.title}</span>
                     </button>
                   </li>
                 ))}
               </ul>
             )}
-            <button type="button" onClick={onOpenCalendar} className="mt-2 w-full text-right text-xs text-white/35">
+            <button type="button" onClick={onOpenCalendar} className="mt-3 text-sm text-white/45">
               Ver semana
             </button>
-          </article>
+          </section>
 
-          <article className="rounded-2xl border border-white/[0.07] bg-[#161a22] px-4 py-4">
-            <h2 className="text-[15px] font-semibold text-white">Pendiente hoy</h2>
-            {pendingDesktop.length === 0 ? (
-              <p className="mt-4 text-sm text-white/40">Nada pendiente</p>
-            ) : (
-              <ul className="mt-2">
-                {pendingDesktop.map((row) => (
-                  <li key={`${row.kind}-${row.id}`} className="border-b border-white/[0.05] last:border-b-0">
+          <section className={`${SURFACE} px-4 py-4`} aria-label="Pendiente">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-[15px] font-medium text-white">Pendiente</h2>
+              <AddButton label="Añadir pendiente" onClick={() => setPendingChooser(true)} />
+            </div>
+            <ul className="mt-2 lg:hidden">
+              {pendingMobile.length === 0 ? (
+                <li>
+                  <p className="py-3 text-sm text-white/45">Nada pendiente.</p>
+                </li>
+              ) : (
+                pendingMobile.map((row) => (
+                  <li key={`m-${row.kind}-${row.id}`} className="border-b border-white/[0.06] last:border-b-0">
+                    <button
+                      type="button"
+                      onClick={() => onComplete(row)}
+                      className="flex w-full items-start gap-3 py-3 text-left"
+                      aria-label={`Marcar como hecho: ${row.title}`}
+                    >
+                      <span className="mt-0.5 h-[18px] w-[18px] shrink-0 rounded-full border border-white/35" aria-hidden />
+                      <span className="min-w-0">
+                        <span className="block truncate text-[15px] text-[#e4e6ed]">{row.title}</span>
+                        <span className="block truncate text-[13px] text-white/40">{row.subtitle}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+            <ul className="mt-1 hidden lg:block">
+              {pendingDesktop.length === 0 ? (
+                <li>
+                  <p className="py-3 text-sm text-white/45">Nada pendiente.</p>
+                </li>
+              ) : (
+                pendingDesktop.map((row) => (
+                  <li key={`d-${row.kind}-${row.id}`} className="border-b border-white/[0.06] last:border-b-0">
                     <button
                       type="button"
                       onClick={() => onOpenPending(row)}
                       className="flex w-full items-center gap-3 py-3 text-left"
                     >
-                      <span className="text-lg" aria-hidden>
-                        {PENDING_EMOJI[row.kind]}
-                      </span>
+                      <span className="h-[18px] w-[18px] shrink-0 rounded-full border border-white/35" aria-hidden />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-[#e4e6ed]">{row.title}</span>
                         <span className="block truncate text-xs text-white/40">{row.subtitle}</span>
@@ -199,11 +187,20 @@ export function InicioView({
                       <ChevronRight className="h-4 w-4 shrink-0 text-white/30" aria-hidden />
                     </button>
                   </li>
-                ))}
-              </ul>
-            )}
-          </article>
+                ))
+              )}
+            </ul>
+          </section>
         </div>
+
+        <button
+          type="button"
+          onClick={onOpenCasa}
+          className="mt-6 flex w-full items-center justify-between text-[15px] text-[#e4e6ed] lg:hidden"
+        >
+          Ver rincones
+          <ChevronRight className="h-4 w-4 text-white/35" aria-hidden />
+        </button>
       </div>
 
       <aside className="hidden lg:block" aria-label="Rincones">
@@ -230,6 +227,84 @@ export function InicioView({
           </div>
         )}
       </aside>
+
+      {pendingChooser ? (
+        <AddPendingSheet
+          onClose={() => setPendingChooser(false)}
+          onChoose={(kind) => {
+            setPendingChooser(false);
+            onAddPending(kind);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#4CC9A0] px-3 py-1 text-[13px] font-semibold text-[#06281c]"
+    >
+      <Plus className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden />
+      Añadir
+    </button>
+  );
+}
+
+function AddPendingSheet({
+  onClose,
+  onChoose,
+}: {
+  onClose: () => void;
+  onChoose: (kind: PendingAddKind) => void;
+}) {
+  useEscapeKey(onClose);
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/55 p-4 sm:items-center"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-pending-title"
+        className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1c1f27] p-4"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="add-pending-title" className="text-base font-semibold text-white">
+          Añadir pendiente
+        </h2>
+        <p className="mt-1 text-sm text-white/45">Se guarda en el rincón que elijas.</p>
+        <div className="mt-4 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => onChoose("shopping")}
+            aria-label="Compra, lista de la compra"
+            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+          >
+            <span className="block text-sm font-medium text-[#e4e6ed]">Compra</span>
+            <span className="block text-xs text-white/40">Lista de la compra</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onChoose("cleaning")}
+            aria-label="Limpieza, tarea de casa"
+            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left"
+          >
+            <span className="block text-sm font-medium text-[#e4e6ed]">Limpieza</span>
+            <span className="block text-xs text-white/40">Tarea de casa</span>
+          </button>
+        </div>
+        <button type="button" onClick={onClose} className="mt-3 w-full py-2 text-sm text-white/45">
+          Cancelar
+        </button>
+      </div>
     </div>
   );
 }
@@ -247,7 +322,7 @@ function RinconCard({
   const progress = Math.max(0, Math.min(100, (domain.weight / 15) * 100));
 
   return (
-    <article className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#161a22]">
+    <article className={`relative overflow-hidden ${SURFACE}`}>
       <div className="h-0.5" style={{ backgroundColor: domain.line }} />
       <button type="button" onClick={onOpen} className="block w-full px-3.5 pt-3 pb-3 text-left">
         <div className="flex items-start justify-between gap-2 pr-6">
@@ -271,7 +346,7 @@ function RinconCard({
         type="button"
         onClick={onDeactivate}
         aria-label={`Desactivar ${domain.name}`}
-        className="absolute top-3 right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-white/15 bg-[#090b10]/80 text-xs text-white/70"
+        className="absolute top-3 right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-white/15 bg-[#14161b]/80 text-xs text-white/70"
       >
         ×
       </button>

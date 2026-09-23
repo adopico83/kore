@@ -21,7 +21,7 @@ export function HomeTabBar({ tab, onChange, onOpenAgent }: HomeTabBarProps) {
   return (
     <nav
       aria-label="Secciones"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#090b10]/95 backdrop-blur-md"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#14161b]/95 backdrop-blur-md"
     >
       <div className="relative mx-auto w-full max-w-6xl">
         <div
@@ -59,7 +59,8 @@ function TabButton({
   onChange: (tab: HomeTab) => void;
 }) {
   const Icon = item.icon;
-  const tone = active ? "text-[#4CC9A0]" : "text-white/45";
+  const labelTone = active ? "text-[#4CC9A0]" : "text-white/45";
+  const iconTone = !active && item.id === "corcho" ? "text-[#E05555]" : labelTone;
 
   return (
     <button
@@ -67,9 +68,9 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={() => onChange(item.id)}
-      className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 text-[11px] font-medium lg:text-sm ${tone}`}
+      className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 text-[11px] font-medium lg:text-sm ${labelTone}`}
     >
-      <Icon className="h-[18px] w-[18px] lg:hidden" strokeWidth={1.75} />
+      <Icon className={`h-[18px] w-[18px] lg:hidden ${iconTone}`} strokeWidth={1.75} />
       <span className="lg:hidden">{item.label}</span>
       <span className="hidden lg:inline">{item.desktopLabel ?? item.label}</span>
     </button>

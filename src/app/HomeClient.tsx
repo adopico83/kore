@@ -373,6 +373,7 @@ export function HomeClient({
   const [showPerfil, setShowPerfil] = useState(false);
   const [usuarioPerfil, setUsuarioPerfil] = useState<Profile | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [calendarFocusComposer, setCalendarFocusComposer] = useState(false);
   const [showAddCornerModal, setShowAddCornerModal] = useState(false);
   const [inactiveDomainOptions, setInactiveDomainOptions] = useState<InactiveDomainOption[]>([]);
   const [addCornerLoading, setAddCornerLoading] = useState(false);
@@ -1025,7 +1026,7 @@ export function HomeClient({
   }, [familyContext.adults, familyContext.currentUser]);
 
   return (
-    <div className="min-h-dvh bg-[#090b10] text-[#e4e6ed]">
+    <div className="min-h-dvh bg-[#14161b] text-[#e4e6ed]">
       <HomeHeader
         familyName={familyName}
         adults={familyContext.adults.slice(0, 2).map((profile) => ({ id: profile.id, name: profile.name }))}
@@ -1051,8 +1052,18 @@ export function HomeClient({
             inviteCopied={inviteCopied}
             onCopyInvite={() => void handleCopyInviteCode()}
             onOpenCalendar={() => {
+              setCalendarFocusComposer(false);
               setCalendarInitialDate(new Date());
               setShowCalendar(true);
+            }}
+            onAddAgenda={() => {
+              setCalendarFocusComposer(true);
+              setCalendarInitialDate(new Date());
+              setShowCalendar(true);
+            }}
+            onAddPending={(kind) => {
+              if (kind === "shopping") openDomainByName("Compras");
+              else openDomainByName("Limpieza");
             }}
             onComplete={(row) => void handleCompletePending(row)}
             onOpenPending={handleOpenPending}
@@ -1197,9 +1208,11 @@ export function HomeClient({
           onClose={() => {
             setShowCalendar(false);
             setCalendarInitialDate(null);
+            setCalendarFocusComposer(false);
           }}
           events={agendaEvents}
           initialDate={calendarInitialDate}
+          focusComposer={calendarFocusComposer}
           onAddEvent={handleCalendarAddEvent}
           onUpdateEvent={handleCalendarUpdateEvent}
           onDeleteEvent={handleCalendarDeleteEvent}

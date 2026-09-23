@@ -3,7 +3,7 @@ export default function Loading() {
     <main
       style={{
         minHeight: "100dvh",
-        backgroundColor: "#090b10",
+        backgroundColor: "#14161b",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
