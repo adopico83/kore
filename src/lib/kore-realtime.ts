@@ -21,12 +21,25 @@ const REALTIME_TABLES = [
 
 export type KoreRealtimeTable = (typeof REALTIME_TABLES)[number];
 
+export type KoreRealtimeChange = {
+  table: KoreRealtimeTable;
+  event: "INSERT" | "UPDATE" | "DELETE";
+  row: Record<string, unknown> | null;
+  id: string | null;
+};
+
+function rowId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" ? id : null;
+}
+
 /**
  * Suscripción Supabase Realtime a tablas críticas.
- * Memoriza el callback con `useRef` para no re-suscribir en cada render;
- * igualmente conviene envolver `onUpdate` en `useCallback` en el padre.
+ * Entrega la fila (o el id en un borrado) para mezclarla en el estado local.
+ * Memoriza el callback con `useRef` para no re-suscribir en cada render.
  */
-export function useKoreRealtime(onUpdate: (table: string) => void) {
+export function useKoreRealtime(onUpdate: (change: KoreRealtimeChange) => void) {
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
 
@@ -38,8 +51,15 @@ export function useKoreRealtime(onUpdate: (table: string) => void) {
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table },
-          () => {
-            onUpdateRef.current(table);
+          (payload) => {
+            const event = payload.eventType;
+            const source = event === "DELETE" ? payload.old : payload.new;
+            onUpdateRef.current({
+              table,
+              event,
+              row: event === "DELETE" || !source ? null : (source as Record<string, unknown>),
+              id: rowId(source),
+            });
           },
         )
         .subscribe(),

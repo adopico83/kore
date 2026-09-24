@@ -6,6 +6,10 @@ const mockGetScopedUserId = vi.fn();
 vi.mock("@/lib/family-context", () => ({
   getScopedFamilyId: mockGetScopedFamilyId,
   getScopedUserId: mockGetScopedUserId,
+  getScopedIdentity: async () => ({
+    userId: await mockGetScopedUserId(),
+    familyId: await mockGetScopedFamilyId(),
+  }),
 }));
 
 const mockDb = {
@@ -37,8 +41,9 @@ describe("addCorchoNote", () => {
     mockGetScopedFamilyId.mockResolvedValue("fam-1");
     mockGetScopedUserId.mockResolvedValue("user-1");
     mockDb.getProfilesForFamily.mockResolvedValue([{ id: "user-1" }, { id: "user-2" }]);
-    mockDb.insertKoreNote.mockResolvedValue({ id: "note-1" });
+    mockDb.insertKoreNote.mockResolvedValue({ id: "note-1", content: "el parque", sender_id: "user-1" });
     mockDb.saveCorchoNotePhotos.mockResolvedValue(undefined);
+    mockDb.getCorchoPhotoUrlsByNote.mockResolvedValue({ "note-1": ["https://signed.example/a.jpg"] });
   });
 
   it("exige texto o una foto", async () => {
@@ -110,7 +115,10 @@ describe("addCorchoNote", () => {
     formData.set("recipient_id", "user-2");
     formData.append("photos", jpegFile());
 
-    await addCorchoNote(formData);
+    await expect(addCorchoNote(formData)).resolves.toMatchObject({
+      id: "note-1",
+      imageUrls: ["https://signed.example/a.jpg"],
+    });
 
     expect(mockDb.insertKoreNote).toHaveBeenCalledWith(
       mockSessionClient,
@@ -127,6 +135,26 @@ describe("addCorchoNote", () => {
       "note-1",
       [expect.any(Uint8Array)],
     );
+  });
+
+  it("devuelve la nota de solo texto sin pedir fotos", async () => {
+    const { addCorchoNote } = await import("@/lib/actions/corcho");
+    const formData = new FormData();
+    formData.set("content", "compra leche");
+    formData.set("recipient_id", "user-2");
+    formData.set("id", "11111111-1111-4111-8111-111111111111");
+
+    await expect(addCorchoNote(formData)).resolves.toMatchObject({
+      id: "note-1",
+      imageUrls: [],
+    });
+    expect(mockDb.insertKoreNote).toHaveBeenCalledWith(
+      mockSessionClient,
+      "fam-1",
+      expect.objectContaining({ id: "11111111-1111-4111-8111-111111111111", content: "compra leche" }),
+    );
+    expect(mockDb.getCorchoPhotoUrlsByNote).not.toHaveBeenCalled();
+    expect(mockDb.saveCorchoNotePhotos).not.toHaveBeenCalled();
   });
 
   it("borra la nota y sus fotos", async () => {

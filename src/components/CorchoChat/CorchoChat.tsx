@@ -3,8 +3,10 @@
 import { History, ImagePlus, Loader2, Trash2, X } from "lucide-react";
 import type { ChangeEvent, CSSProperties } from "react";
 import {
+  startTransition,
   useCallback,
   useEffect,
+  useOptimistic,
   useRef,
   useState,
   type MouseEvent,
@@ -13,11 +15,12 @@ import {
 } from "react";
 import { corchoMessageText } from "@/components/home/home-model";
 import { CorchoPhotoGrid, CorchoPhotoLightbox } from "@/components/CorchoChat/CorchoPhotos";
-import { emitKoreUpdate } from "@/lib/kore-events";
+import { onKoreRemoteChanges } from "@/lib/kore-events";
+import { mergeCorchoMessage, readKoreNote } from "@/lib/optimistic-state";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 import { CORCHO_MAX_PHOTOS } from "@/lib/corcho-photos";
 import { compressImageToJpegBlob } from "@/lib/compress-image";
-import { addCorchoNote, deleteCorchoNote, getKoreNotes } from "@/lib/actions/corcho";
+import { addCorchoNote, deleteCorchoNote, getKoreNotes, type CorchoNote } from "@/lib/actions/corcho";
 
 const GREEN = "#4CC9A0";
 const PURPLE = "#9B8FE8";
@@ -35,7 +38,18 @@ type CorchoMessage = {
   content: string;
   at: string;
   imageUrls: string[];
+  pending?: boolean;
 };
+
+type CorchoListAction = { type: "upsert"; message: CorchoMessage } | { type: "remove"; id: string };
+
+function applyCorchoAction(messages: CorchoMessage[], action: CorchoListAction): CorchoMessage[] {
+  if (action.type === "remove") return messages.filter((message) => message.id !== action.id);
+  if (messages.some((message) => message.id === action.message.id)) {
+    return messages.map((message) => (message.id === action.message.id ? action.message : message));
+  }
+  return [...messages, action.message];
+}
 
 type FotoPendiente = {
   id: string;
@@ -129,6 +143,8 @@ export type CorchoChatProps = {
   recipientName?: string;
   /** Dentro de la pestaña, sin cubrir el chrome de la home. */
   embedded?: boolean;
+  onNoteSaved?: (note: CorchoNote) => void;
+  onNoteDeleted?: (id: string) => void;
 };
 
 export function CorchoChat({
@@ -137,11 +153,14 @@ export function CorchoChat({
   partnerUserId,
   recipientName = "tu pareja",
   embedded = false,
+  onNoteSaved,
+  onNoteDeleted,
 }: CorchoChatProps) {
   const [mensaje, setMensaje] = useState("");
   const [conversationId, setConversationId] = useState("");
   const [conversaciones, setConversaciones] = useState<CorchoConv[]>([]);
   const [historial, setHistorial] = useState<CorchoMessage[]>([]);
+  const [optimisticHistorial, applyCorcho] = useOptimistic(historial, applyCorchoAction);
   const [panelHistorial, setPanelHistorial] = useState(false);
   const [error, setError] = useState("");
   const [grabando, setGrabando] = useState(false);
@@ -205,9 +224,32 @@ export function CorchoChat({
   }, [loadMessages]);
 
   useEffect(() => {
+    return onKoreRemoteChanges((changes) => {
+      for (const change of changes) {
+        if (change.table !== "kore_notes") continue;
+        if (change.event === "DELETE" && change.id) {
+          const id = change.id;
+          setHistorial((prev) => prev.filter((message) => message.id !== id));
+          continue;
+        }
+        const note = readKoreNote(change.row);
+        if (!note) continue;
+        const message: CorchoMessage = {
+          id: note.id,
+          role: note.sender_id === currentUserId ? "me" : "partner",
+          content: corchoMessageText(note.content, 0),
+          at: note.created_at ?? "",
+          imageUrls: [],
+        };
+        setHistorial((prev) => mergeCorchoMessage(prev, message));
+      }
+    });
+  }, [currentUserId]);
+
+  useEffect(() => {
     if (!listRef.current) return;
     listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [historial, panelHistorial, transcribiendo]);
+  }, [optimisticHistorial, panelHistorial, transcribiendo]);
 
   const touchEnd = (fn: () => void, disabled?: boolean) => ({
     onTouchEnd: (e: TouchEvent) => {
@@ -268,25 +310,49 @@ export function CorchoChat({
 
     setEnviando(true);
     setError("");
-    try {
-      const formData = new FormData();
-      formData.set("content", clean);
-      formData.set("recipient_id", pid);
-      fotos.forEach((foto, index) => {
-        formData.append("photos", new File([foto.blob], `foto-${index + 1}.jpg`, { type: "image/jpeg" }));
+    setMensaje("");
+    setFotosPendientes([]);
+    const tempId = crypto.randomUUID();
+    startTransition(async () => {
+      applyCorcho({
+        type: "upsert",
+        message: {
+          id: tempId,
+          role: "me",
+          content: corchoMessageText(clean, fotos.length),
+          at: new Date().toISOString(),
+          imageUrls: fotos.map((foto) => foto.url),
+          pending: true,
+        },
       });
-      await addCorchoNote(formData);
-      soltarFotos(fotos);
-      setFotosPendientes([]);
-      setMensaje("");
-      await loadMessages();
-      emitKoreUpdate(["kore_notes"]);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "No se pudo enviar el recado.");
-    } finally {
-      setEnviando(false);
-      if (fromTranscription) setTranscribiendo(false);
-    }
+      try {
+        const formData = new FormData();
+        formData.set("id", tempId);
+        formData.set("content", clean);
+        formData.set("recipient_id", pid);
+        fotos.forEach((foto, index) => {
+          formData.append("photos", new File([foto.blob], `foto-${index + 1}.jpg`, { type: "image/jpeg" }));
+        });
+        const note = await addCorchoNote(formData);
+        const saved: CorchoMessage = {
+          id: note.id,
+          role: "me",
+          content: corchoMessageText(note.content, note.imageUrls.length),
+          at: note.created_at ?? new Date().toISOString(),
+          imageUrls: note.imageUrls,
+        };
+        setHistorial((prev) => mergeCorchoMessage(prev, saved));
+        onNoteSaved?.(note);
+        queueMicrotask(() => soltarFotos(fotos));
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "No se pudo enviar el recado. Se ha deshecho.");
+        setMensaje(clean);
+        setFotosPendientes(fotos);
+      } finally {
+        setEnviando(false);
+        if (fromTranscription) setTranscribiendo(false);
+      }
+    });
   };
 
   const handleEnviar = () => {
@@ -328,16 +394,17 @@ export function CorchoChat({
 
   const eliminarRecado = (id: string) => {
     if (!window.confirm("¿Eliminar este recado? También se borrarán sus fotos.")) return;
-    void (async () => {
+    startTransition(async () => {
+      applyCorcho({ type: "remove", id });
       try {
         await deleteCorchoNote(id);
-        await loadMessages();
-        emitKoreUpdate(["kore_notes"]);
+        setHistorial((prev) => prev.filter((message) => message.id !== id));
+        onNoteDeleted?.(id);
         setError("");
       } catch (error) {
-        setError(error instanceof Error ? error.message : "No se pudo eliminar el recado.");
+        setError(error instanceof Error ? error.message : "No se pudo eliminar el recado. Se ha deshecho.");
       }
-    })();
+    });
   };
 
   const attachRecorderToStream = (stream: MediaStream) => {
@@ -520,16 +587,16 @@ export function CorchoChat({
               ))
             )}
           </ul>
-        ) : historial.length === 0 && !transcribiendo ? (
+        ) : optimisticHistorial.length === 0 && !transcribiendo ? (
           <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", padding: 12, color: "rgba(255,255,255,0.75)" }}>
             {`Escribe a ${recipientName}...`}
           </div>
         ) : (
           <>
-            {historial.map((msg) => {
+            {optimisticHistorial.map((msg) => {
               const isMe = msg.role === "me";
               return (
-                <div key={msg.id} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start" }}>
+                <div key={msg.id} aria-busy={msg.pending ? true : undefined} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", opacity: msg.pending ? 0.55 : 1 }}>
                   <div style={{ maxWidth: "90%" }}>
                     <div
                       style={{
@@ -550,7 +617,7 @@ export function CorchoChat({
                     </div>
                     <div style={{ marginTop: 4, display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", alignItems: "center", gap: 8 }}>
                       <p style={{ margin: 0, fontSize: 10, color: "rgba(255,255,255,0.45)" }}>
-                        {formatHHMM(msg.at)}
+                        {msg.pending ? "Enviando…" : formatHHMM(msg.at)}
                       </p>
                       <button
                         type="button"

@@ -5,6 +5,10 @@ const mockSessionClient = { id: "session-client" };
 
 vi.mock("@/lib/family-context", () => ({
   getScopedFamilyId: mockGetScopedFamilyId,
+  getScopedIdentity: async () => ({
+    userId: "user-1",
+    familyId: await mockGetScopedFamilyId(),
+  }),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({

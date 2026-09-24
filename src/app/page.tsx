@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
 import { HomeClient } from "./HomeClient";
-import { getScopedFamilyId } from "@/lib/family-context";
+import { getScopedIdentity } from "@/lib/family-context";
 import { createClient } from "@/lib/supabase/server";
 import {
   getProfiles,
@@ -30,60 +30,26 @@ async function computePartnerHasAuthAccount(profiles: Profile[]): Promise<boolea
   if (otherAdults.length === 0) return false;
 
   const admin = createAdminClient();
-  for (const p of otherAdults) {
-    const { data, error } = await admin.auth.admin.getUserById(p.id);
-    if (!error && data?.user) return true;
-  }
-  return false;
+  const checks = await Promise.all(
+    otherAdults.map(async (profile) => {
+      const { data, error } = await admin.auth.admin.getUserById(profile.id);
+      return !error && Boolean(data?.user);
+    }),
+  );
+  return checks.some(Boolean);
 }
 
 export default async function Home() {
-  console.log("PAGE.TSX EJECUTÁNDOSE");
-  const supabase = await createClient();
-  let familyName = "";
-  let initialInviteCode: string | null = null;
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  console.log("AUTH USER EN PAGE:", user?.id ?? "NULL");
-
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("family_id")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.family_id) {
-      const { data: family } = await supabase
-        .from("families")
-        .select("onboarding_step, name, invite_code")
-        .eq("id", profile.family_id)
-        .single();
-      familyName = family?.name ?? "";
-      const rawInvite = family?.invite_code;
-      initialInviteCode = typeof rawInvite === "string" && rawInvite.trim() ? rawInvite.trim() : null;
-
-      console.log("USER:", user?.id);
-      console.log("PROFILE:", profile);
-      console.log("FAMILY:", family);
-      console.log("ONBOARDING STEP:", family?.onboarding_step);
-      console.log("FAMILY ONBOARDING:", family?.onboarding_step);
-
-      if (family?.onboarding_step === "pending") {
-        redirect("/onboarding");
-      }
-    }
-  }
-
-  const familyId = await getScopedFamilyId();
+  const identity = await getScopedIdentity();
+  const userId = identity.userId ?? "";
+  const familyId = identity.familyId;
 
   if (!familyId) {
     return (
       <HomeClient
-        currentUserId={user?.id ?? ""}
-        familyName={familyName}
-        initialInviteCode={initialInviteCode}
+        currentUserId={userId}
+        familyName=""
+        initialInviteCode={null}
         partnerHasAuthAccount={false}
         initialProfiles={[]}
         initialDomains={[]}
@@ -100,6 +66,35 @@ export default async function Home() {
     );
   }
 
+  const supabase = await createClient();
+  const familyQuery = supabase
+    .from("families")
+    .select("onboarding_step, name, invite_code")
+    .eq("id", familyId)
+    .single();
+
+  const [familyResult, domainData] = await Promise.all([
+    familyQuery,
+    Promise.all([
+      getProfiles(supabase, familyId),
+      getDomains(supabase, familyId),
+      getCalendarEvents(supabase, familyId),
+      getExpenses(supabase, familyId),
+      getHealthRecords(supabase, familyId),
+      getKoreNotes(supabase, familyId),
+      getShoppingItems(supabase, familyId),
+      getPendingCleaningTasks(supabase, familyId),
+      getWeeklyMenu(supabase, familyId),
+      getSleepSessions(supabase, familyId, 14),
+      getSchoolEvents(supabase, familyId),
+    ]),
+  ]);
+
+  const family = familyResult.data;
+  if (family?.onboarding_step === "pending") {
+    redirect("/onboarding");
+  }
+
   const [
     initialProfiles,
     initialDomainsAll,
@@ -112,43 +107,30 @@ export default async function Home() {
     initialWeeklyMenu,
     initialSleepSessions,
     initialSchoolEvents,
-  ] = await Promise.all([
-    getProfiles(supabase, familyId),
-    getDomains(supabase, familyId),
-    getCalendarEvents(supabase, familyId),
-    getExpenses(supabase, familyId),
-    getHealthRecords(supabase, familyId),
-    getKoreNotes(supabase, familyId),
-    getShoppingItems(supabase, familyId),
-    getPendingCleaningTasks(supabase, familyId),
-    getWeeklyMenu(supabase, familyId),
-    getSleepSessions(supabase, familyId, 14),
-    getSchoolEvents(supabase, familyId),
-  ]);
+  ] = domainData;
 
   const initialDomains = initialDomainsAll.filter((domain) => domain.is_active === true);
   const latestNotes = allKoreNotes.slice(0, 3);
-  const photoUrls = await getCorchoPhotoUrlsByNote(
-    supabase,
-    familyId,
-    latestNotes.map((note) => note.id),
-  );
+  const rawInvite = family?.invite_code;
+  const initialInviteCode = typeof rawInvite === "string" && rawInvite.trim() ? rawInvite.trim() : null;
+
+  const [photoUrls, partnerHasAuthAccount] = await Promise.all([
+    getCorchoPhotoUrlsByNote(
+      supabase,
+      familyId,
+      latestNotes.map((note) => note.id),
+    ),
+    computePartnerHasAuthAccount(initialProfiles).catch(() => false),
+  ]);
   const initialKoreNotes = latestNotes.map((note) => ({
     ...note,
     imageUrls: photoUrls[note.id] ?? [],
   }));
 
-  let partnerHasAuthAccount = false;
-  try {
-    partnerHasAuthAccount = await computePartnerHasAuthAccount(initialProfiles);
-  } catch {
-    partnerHasAuthAccount = false;
-  }
-
   return (
     <HomeClient
-      currentUserId={user?.id ?? ""}
-      familyName={familyName}
+      currentUserId={userId}
+      familyName={family?.name ?? ""}
       initialInviteCode={initialInviteCode}
       partnerHasAuthAccount={partnerHasAuthAccount}
       initialProfiles={initialProfiles}

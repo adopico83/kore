@@ -875,6 +875,7 @@ export async function addShoppingItem(
   client: KoreServerDbClient,
   familyId: string,
   data: {
+    id?: string;
     name: string;
     quantity?: string;
     category?: string;
@@ -883,6 +884,7 @@ export async function addShoppingItem(
   },
 ): Promise<ShoppingItemRow> {
   const payload = {
+    ...(data.id ? { id: data.id } : {}),
     family_id: familyId,
     name: data.name,
     quantity: data.quantity ?? null,

@@ -1,5 +1,6 @@
 import { resolveIdByName, resolveProfileIdFromAgentToken } from "@/lib/family-utils";
 import type { HealthRecord, HealthRecordInsert, Profile } from "@/lib/kore-db";
+import { removeSaludItem, upsertById } from "@/lib/optimistic-state";
 
 export type MappedSaludCita = { id: string; descripcion: string; fecha: string; hora: string; lugar: string };
 export type MappedSaludMedicacion = {
@@ -193,6 +194,25 @@ export function descriptionWithCalendarEventId(
   } satisfies KoreCitaPayloadV2);
 }
 
+/** La cita ya trae el id de agenda en la descripción: la UI lo pinta sin otra lectura. */
+export function calendarEventFromHealthRecord(record: Pick<
+  HealthRecord,
+  "type" | "description" | "date_time" | "patient_id" | "created_at"
+>): { id: string; title: string; date: string; time: string; created_by: string | null; created_at: string } | null {
+  if (record.type !== "appointment") return null;
+  const id = calendarEventIdFromDescription(record.description);
+  const fields = agendaFieldsForAppointment(record.description, record.date_time);
+  if (!id || !fields) return null;
+  return {
+    id,
+    title: fields.title,
+    date: fields.date,
+    time: fields.time,
+    created_by: record.patient_id,
+    created_at: record.created_at ?? "",
+  };
+}
+
 export function saludFromHealthRecords(rows: HealthRecord[], profiles: Profile[]): MappedSaludData {
   const out = emptySaludForProfiles(profiles);
   const ensure = (pid: string) => {
@@ -214,6 +234,29 @@ export function saludFromHealthRecords(rows: HealthRecord[], profiles: Profile[]
     }
   }
   return out;
+}
+
+/** Sustituye la fila optimista por el registro que devolvió la acción, sin releer la lista. */
+export function commitHealthRecord(
+  state: MappedSaludData,
+  profiles: Profile[],
+  record: HealthRecord,
+  tempId: string,
+): MappedSaludData {
+  const stripped = removeSaludItem(state, tempId);
+  if ((record.type !== "appointment" && record.type !== "medication") || !record.id || !record.patient_id) {
+    return stripped;
+  }
+  const incoming = saludFromHealthRecords([record], profiles);
+  const next: MappedSaludData = { ...stripped };
+  for (const [key, member] of Object.entries(incoming)) {
+    const current = next[key] ?? emptyMember();
+    next[key] = {
+      citas: member.citas.reduce((list, cita) => upsertById(list, cita), current.citas),
+      medicaciones: member.medicaciones.reduce((list, med) => upsertById(list, med), current.medicaciones),
+    };
+  }
+  return next;
 }
 
 export function buildCitaHealthInsert(

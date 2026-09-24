@@ -16,6 +16,7 @@ export async function getShoppingItems() {
 }
 
 export async function addShoppingItem(data: {
+  id?: string;
   name: string;
   quantity?: string;
   category?: string;

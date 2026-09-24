@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useOptimistic, useState } from "react";
 import { LS_KORE_SALUD, type SaludData } from "@/components/SaludModal";
 import { SaludPickerField } from "@/components/SaludModal/SaludPickerField";
 import {
@@ -14,11 +14,13 @@ import {
   buildCitaHealthUpdate,
   buildMedHealthInsert,
   buildMedHealthUpdate,
+  commitHealthRecord,
   emptySaludForProfiles,
   saludFromHealthRecords,
 } from "@/lib/kore-salud-sync";
-import type { Profile } from "@/lib/kore-db";
+import type { HealthRecord, Profile } from "@/lib/kore-db";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { applySaludAction, type SaludListAction } from "@/lib/optimistic-state";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 type Cita = {
@@ -27,6 +29,7 @@ type Cita = {
   fecha: string;
   hora: string;
   lugar: string;
+  pending?: boolean;
 };
 
 type Medicacion = {
@@ -35,6 +38,7 @@ type Medicacion = {
   dosis: string;
   frecuenciaHoras: number;
   proximaToma: string;
+  pending?: boolean;
 };
 
 function emptyMember() {
@@ -75,9 +79,10 @@ export type SaludResumenModalProps = {
   onClose: () => void;
   profiles: Profile[];
   onChange?: (next: SaludData) => void;
+  onRecordSaved?: (record: HealthRecord) => void;
 };
 
-export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenModalProps) {
+export function SaludResumenModal({ onClose, profiles, onChange, onRecordSaved }: SaludResumenModalProps) {
   useEscapeKey(onClose);
   const safeProfiles = profiles ?? [];
   const [data, setData] = useState<SaludData>(() => readSalud(safeProfiles));
@@ -100,11 +105,19 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
   const [addingType, setAddingType] = useState<"cita" | "medicacion">("cita");
   const [newCita, setNewCita] = useState({ descripcion: "", fecha: "", hora: "", lugar: "" });
   const [newMed, setNewMed] = useState({ nombre: "", dosis: "", frecuenciaHoras: "", proximaToma: "" });
+  const [saveError, setSaveError] = useState("");
+  const [optimisticSalud, applyOptimisticSalud] = useOptimistic(
+    data,
+    (state: SaludData, action: SaludListAction<Cita, Medicacion>) => applySaludAction(state, action),
+  );
 
-  const persist = (next: SaludData) => {
-    setData(next);
-    saveSalud(next);
-    onChange?.(next);
+  const persist = (next: SaludData | ((prev: SaludData) => SaludData)) => {
+    setData((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      saveSalud(resolved);
+      queueMicrotask(() => onChange?.(resolved));
+      return resolved;
+    });
   };
 
   useEffect(() => {
@@ -231,68 +244,63 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
     }
   };
 
-  const addNew = async () => {
+  const addNew = () => {
     if (!addingMemberId) return;
+    const memberId = addingMemberId;
     if (addingType === "cita") {
       if (!newCita.descripcion.trim() || !newCita.fecha || !newCita.hora) return;
-      try {
-        await addHealthRecord(
-          buildCitaHealthInsert(addingMemberId, {
-            descripcion: newCita.descripcion.trim(),
-            fecha: newCita.fecha,
-            hora: newCita.hora,
-            lugar: newCita.lugar.trim(),
-          }),
-        );
-        setNewCita({ descripcion: "", fecha: "", hora: "", lugar: "" });
-        setAddingMemberId(null);
-        await reloadFromRemote();
-        emitKoreUpdate(["health_records", "calendar_events"]);
-      } catch {
-        const next = structuredClone(data);
-        if (!next[addingMemberId]) next[addingMemberId] = emptyMember();
-        next[addingMemberId].citas.push({
-          id: crypto.randomUUID?.() ?? `cita_${Date.now()}`,
-          descripcion: newCita.descripcion.trim(),
-          fecha: newCita.fecha,
-          hora: newCita.hora,
-          lugar: newCita.lugar.trim(),
-        });
-        setNewCita({ descripcion: "", fecha: "", hora: "", lugar: "" });
-        setAddingMemberId(null);
-        persist(next);
-      }
+      const tempId = crypto.randomUUID();
+      const draft = {
+        descripcion: newCita.descripcion.trim(),
+        fecha: newCita.fecha,
+        hora: newCita.hora,
+        lugar: newCita.lugar.trim(),
+      };
+      setSaveError("");
+      setNewCita({ descripcion: "", fecha: "", hora: "", lugar: "" });
+      setAddingMemberId(null);
+      startTransition(async () => {
+        applyOptimisticSalud({ type: "add-cita", memberId, cita: { id: tempId, ...draft, pending: true } });
+        try {
+          const record = await addHealthRecord({ ...buildCitaHealthInsert(memberId, draft), id: tempId });
+          persist((prev) => commitHealthRecord(prev, safeProfiles, record, tempId));
+          onRecordSaved?.(record);
+        } catch {
+          setSaveError("No se pudo guardar la cita. Se ha deshecho.");
+          setAddingMemberId(memberId);
+          setNewCita(draft);
+        }
+      });
       return;
     }
     const freq = Number(newMed.frecuenciaHoras);
     if (!newMed.nombre.trim() || !newMed.dosis.trim() || Number.isNaN(freq) || freq <= 0 || !newMed.proximaToma) return;
-    try {
-      await addHealthRecord(
-        buildMedHealthInsert(addingMemberId, {
-          nombre: newMed.nombre.trim(),
-          dosis: newMed.dosis.trim(),
-          frecuenciaHoras: freq,
-          proximaToma: newMed.proximaToma,
-        }),
-      );
-      setNewMed({ nombre: "", dosis: "", frecuenciaHoras: "", proximaToma: "" });
-      setAddingMemberId(null);
-      await reloadFromRemote();
-      emitKoreUpdate(["health_records"]);
-    } catch {
-      const next = structuredClone(data);
-      if (!next[addingMemberId]) next[addingMemberId] = emptyMember();
-      next[addingMemberId].medicaciones.push({
-        id: crypto.randomUUID?.() ?? `med_${Date.now()}`,
-        nombre: newMed.nombre.trim(),
-        dosis: newMed.dosis.trim(),
-        frecuenciaHoras: freq,
-        proximaToma: newMed.proximaToma,
+    const tempId = crypto.randomUUID();
+    const draft = {
+      nombre: newMed.nombre.trim(),
+      dosis: newMed.dosis.trim(),
+      frecuenciaHoras: freq,
+      proximaToma: newMed.proximaToma,
+    };
+    setSaveError("");
+    setNewMed({ nombre: "", dosis: "", frecuenciaHoras: "", proximaToma: "" });
+    setAddingMemberId(null);
+    startTransition(async () => {
+      applyOptimisticSalud({
+        type: "add-med",
+        memberId,
+        med: { id: tempId, ...draft, pending: true },
       });
-      setNewMed({ nombre: "", dosis: "", frecuenciaHoras: "", proximaToma: "" });
-      setAddingMemberId(null);
-      persist(next);
-    }
+      try {
+        const record = await addHealthRecord({ ...buildMedHealthInsert(memberId, draft), id: tempId });
+        persist((prev) => commitHealthRecord(prev, safeProfiles, record, tempId));
+        onRecordSaved?.(record);
+      } catch {
+        setSaveError("No se pudo guardar la medicación. Se ha deshecho.");
+        setAddingMemberId(memberId);
+        setNewMed({ ...draft, frecuenciaHoras: String(draft.frecuenciaHoras) });
+      }
+    });
   };
 
   const colors = ["#4CC9A0", "#2CB1A3", "#EF9F27", "#9B8FE8"];
@@ -333,8 +341,13 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
       </header>
 
       <main style={{ flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+        {saveError ? (
+          <p role="alert" style={{ margin: 0, fontSize: 12, color: "#fecaca" }}>
+            {saveError}
+          </p>
+        ) : null}
         {safeProfiles.map((member, index) => {
-          const memberData = data[member.id] ?? emptyMember();
+          const memberData = optimisticSalud[member.id] ?? emptyMember();
           const citas = memberData.citas;
           const meds = memberData.medicaciones;
           const memberColor = colors[index % colors.length];
@@ -364,7 +377,7 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
                       const key = `cita:${member.id}:${c.id}`;
                       const isEditing = editingKey === key;
                       return (
-                        <div key={c.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8 }}>
+                        <div key={c.id} aria-busy={c.pending ? true : undefined} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8, opacity: c.pending ? 0.55 : 1 }}>
                           {isEditing ? (
                             <div style={{ display: "grid", gap: 8 }}>
                               <input value={citaDraft.descripcion} onChange={(e) => setCitaDraft((d) => ({ ...d, descripcion: e.target.value }))} placeholder="Descripción" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
@@ -402,7 +415,7 @@ export function SaludResumenModal({ onClose, profiles, onChange }: SaludResumenM
                       const key = `med:${member.id}:${m.id}`;
                       const isEditing = editingKey === key;
                       return (
-                        <div key={m.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8 }}>
+                        <div key={m.id} aria-busy={m.pending ? true : undefined} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8, opacity: m.pending ? 0.55 : 1 }}>
                           {isEditing ? (
                             <div style={{ display: "grid", gap: 8 }}>
                               <input value={medDraft.nombre} onChange={(e) => setMedDraft((d) => ({ ...d, nombre: e.target.value }))} placeholder="Nombre" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />

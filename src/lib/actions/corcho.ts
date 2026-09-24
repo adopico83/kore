@@ -58,7 +58,7 @@ function photoFiles(formData: FormData): File[] {
     .filter((value): value is File => value instanceof File && value.size > 0);
 }
 
-export async function addCorchoNote(formData: FormData): Promise<void> {
+export async function addCorchoNote(formData: FormData): Promise<CorchoNote> {
   const { familyId, client } = await requireFamilyDb();
   const userId = await getScopedUserId();
   if (!userId) throw new Error("No hay sesión de usuario para enviar el mensaje.");
@@ -99,7 +99,13 @@ export async function addCorchoNote(formData: FormData): Promise<void> {
     throw new Error("El destinatario no pertenece a tu hogar.");
   }
 
+  const requestedId = String(formData.get("id") ?? "").trim();
+  const noteId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedId)
+    ? requestedId
+    : undefined;
+
   const note = await insertKoreNote(client, familyId, {
+    ...(noteId ? { id: noteId } : {}),
     sender_id: userId,
     recipient_id: recipientId,
     content: content || null,
@@ -108,7 +114,7 @@ export async function addCorchoNote(formData: FormData): Promise<void> {
     priority: "low",
   });
 
-  if (files.length === 0) return;
+  if (files.length === 0) return { ...note, imageUrls: [] };
 
   try {
     await saveCorchoNotePhotos(client, familyId, note.id, files);
@@ -120,6 +126,9 @@ export async function addCorchoNote(formData: FormData): Promise<void> {
     }
     throw corchoStorageError(error);
   }
+
+  const imageUrls = await getCorchoPhotoUrlsByNote(client, familyId, [note.id]);
+  return { ...note, imageUrls: imageUrls[note.id] ?? [] };
 }
 
 export async function deleteCorchoNote(noteId: string): Promise<void> {

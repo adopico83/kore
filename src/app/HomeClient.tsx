@@ -13,7 +13,7 @@ import {
   type CalendarEventUpdateDraft,
   type KoreAgendaEvent,
 } from "@/components/CalendarModal/CalendarModal";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useOptimistic, useRef, useState } from "react";
 import { CasaView } from "@/components/home/CasaView";
 import { HomeHeader } from "@/components/home/HomeHeader";
 import { HomeTabBar } from "@/components/home/HomeTabBar";
@@ -52,7 +52,7 @@ import {
   deleteCalendarEvent,
 } from "@/lib/actions/calendar";
 import { getHealthRecords } from "@/lib/actions/health";
-import { describeAppointment, describeMedication } from "@/lib/kore-salud-sync";
+import { calendarEventFromHealthRecord, describeAppointment, describeMedication } from "@/lib/kore-salud-sync";
 import { getExpenses } from "@/lib/actions/expenses";
 import { getKoreNotes } from "@/lib/actions/corcho";
 import {
@@ -64,14 +64,25 @@ import {
   getDomains,
   updateDomain,
 } from "@/lib/actions/domains";
-import { completeShoppingItem, getShoppingItems } from "@/lib/actions/shopping";
+import { addShoppingItem, completeShoppingItem, deleteShoppingItem, getShoppingItems, reactivateShoppingItem } from "@/lib/actions/shopping";
 import { completeCleaningTask, getPendingCleaningTasks } from "@/lib/actions/cleaning";
 import { getWeeklyMenu } from "@/lib/actions/menu";
 import { getSchoolEvents } from "@/lib/actions/school";
 import { getSleepSessions } from "@/lib/actions/sleep";
 import { subscribeToNotificationsAction } from "@/lib/actions/push";
 import { useKoreRealtime } from "@/lib/kore-realtime";
-import { emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
+import { emitKoreRemoteChanges, emitKoreUpdate, onKoreUpdate } from "@/lib/kore-events";
+import {
+  applyListMutation,
+  mergeRemoteRow,
+  readCalendarEvent,
+  readHealthRecord,
+  readKoreNote,
+  readShoppingItem,
+  removeSaludItem,
+  upsertById,
+  type ListMutation,
+} from "@/lib/optimistic-state";
 import { getFamilyContext, resolvePartnerProfile, shouldShowPartnerInviteWidget } from "@/lib/family-utils";
 import { BASE_DOMAINS } from "@/lib/domains-catalog";
 import { getBrowserClient } from "@/lib/supabase/client";
@@ -195,8 +206,24 @@ function mapHealthRowsToDynamicSalud(rows: HealthRecord[]): DynamicSaludData {
   return out;
 }
 
+function mergeDynamicHealth(prev: DynamicSaludData, record: HealthRecord): DynamicSaludData {
+  const without = removeSaludItem(prev, record.id);
+  const active = !record.status || record.status === "active" || record.status === "pending";
+  if (!active) return without;
+  const mapped = mapHealthRowsToDynamicSalud([record]);
+  const next: DynamicSaludData = { ...without };
+  for (const [patientId, member] of Object.entries(mapped)) {
+    const current = next[patientId] ?? emptyHealthMember();
+    next[patientId] = {
+      citas: member.citas.reduce((list, cita) => upsertById(list, cita), current.citas),
+      medicaciones: member.medicaciones.reduce((list, med) => upsertById(list, med), current.medicaciones),
+    };
+  }
+  return next;
+}
+
 function mapKoreNotesToCorchoMessages(
-  rows: Array<KoreNote & { imageUrls?: string[] }>,
+  rows: Array<{ id: string; sender_id: string; content: string | null; imageUrls?: string[] }>,
   profiles: Profile[],
 ): CorchoMessage[] {
   const safeRows = rows ?? [];
@@ -218,6 +245,14 @@ function calendarRowToEvent(row: CalendarEventRow): KoreAgendaEvent {
     fecha: (row.date ?? "").slice(0, 10),
     hora: (row.time ?? "").trim() ? row.time : null,
   };
+}
+
+function sortAgendaEvents(list: Array<KoreAgendaEvent & { pending?: boolean }>) {
+  return [...list].sort((a, b) => {
+    const byDate = (a.fecha ?? "").localeCompare(b.fecha ?? "");
+    if (byDate !== 0) return byDate;
+    return (a.hora ?? "").localeCompare(b.hora ?? "");
+  });
 }
 
 function mapExpenseRowToItem(row: Expense, profiles: Profile[]): ExpenseItem {
@@ -386,6 +421,14 @@ export function HomeClient({
   );
 
   const [shoppingItems, setShoppingItems] = useState<ShoppingItemRow[]>(initialShoppingItems ?? []);
+  type ShoppingView = ShoppingItemRow & { pending?: boolean };
+  type AgendaView = KoreAgendaEvent & { pending?: boolean };
+  const [optimisticShopping, applyShopping] = useOptimistic(shoppingItems, applyListMutation<ShoppingView>);
+  const [optimisticAgenda, applyAgenda] = useOptimistic(
+    agendaEvents,
+    (state: AgendaView[], mutation: ListMutation<AgendaView>) => sortAgendaEvents(applyListMutation(state, mutation)),
+  );
+  const [actionError, setActionError] = useState("");
   const [cleaningTasks, setCleaningTasks] = useState<CleaningTaskRow[]>(initialPendingCleaningTasks ?? []);
   const [domains, setDomains] = useState<DomainCard[]>(() => {
     const activeInitialDomains = (initialDomains ?? []).filter((row) => row.is_active === true);
@@ -739,6 +782,89 @@ export function HomeClient({
     }
   }, [initialKoreNotes, safeInitialProfiles]);
 
+  const refreshShopping = useCallback(async () => {
+    try {
+      setShoppingItems(await getShoppingItems());
+    } catch {
+      /* La lista local sigue en pantalla. */
+    }
+  }, []);
+
+  const refreshCleaning = useCallback(async () => {
+    try {
+      setCleaningTasks(await getPendingCleaningTasks());
+    } catch {
+      /* La lista local sigue en pantalla. */
+    }
+  }, []);
+
+  const refreshMenu = useCallback(async () => {
+    try {
+      const rows = await getWeeklyMenu();
+      setDomains((prev) => prev.map((domain) => enrichMenuDomain(domain, rows)));
+    } catch {
+      /* El rincón conserva el último menú. */
+    }
+  }, []);
+
+  const refreshSleep = useCallback(async () => {
+    try {
+      const rows = await getSleepSessions(14);
+      setDomains((prev) => prev.map((domain) => enrichSuenoDomain(domain, rows, safeInitialProfiles)));
+    } catch {
+      /* El rincón conserva las últimas sesiones. */
+    }
+  }, [safeInitialProfiles]);
+
+  const refreshSchool = useCallback(async () => {
+    try {
+      const rows = await getSchoolEvents();
+      setDomains((prev) => prev.map((domain) => enrichColegioDomain(domain, rows)));
+    } catch {
+      /* El rincón conserva los últimos eventos. */
+    }
+  }, []);
+
+  const refreshTimers = useRef<Record<string, number>>({});
+  const scheduleRefresh = useCallback((key: string, run: () => void) => {
+    const current = refreshTimers.current[key];
+    if (current) window.clearTimeout(current);
+    refreshTimers.current[key] = window.setTimeout(() => {
+      delete refreshTimers.current[key];
+      run();
+    }, 200);
+  }, []);
+
+  const refreshTable = useCallback(
+    (table: string) => {
+      if (table === "shopping_items") scheduleRefresh(table, () => void refreshShopping());
+      else if (table === "cleaning_tasks") scheduleRefresh(table, () => void refreshCleaning());
+      else if (table === "menu_items") scheduleRefresh(table, () => void refreshMenu());
+      else if (table === "sleep_logs" || table === "sleep_sessions") scheduleRefresh("sleep", () => void refreshSleep());
+      else if (table === "school_events") scheduleRefresh(table, () => void refreshSchool());
+      else if (table === "calendar_events") scheduleRefresh(table, () => void loadAgenda());
+      else if (table === "health_records") scheduleRefresh(table, () => void loadSalud());
+      else if (table === "expenses") scheduleRefresh(table, () => void loadExpenses());
+      else if (table === "kore_notes") scheduleRefresh(table, () => void loadCorcho());
+      else if (table === "profiles") scheduleRefresh(table, () => void loadProfiles());
+      else if (table === "domains") scheduleRefresh(table, () => void loadDomains());
+    },
+    [
+      loadAgenda,
+      loadCorcho,
+      loadDomains,
+      loadExpenses,
+      loadProfiles,
+      loadSalud,
+      refreshCleaning,
+      refreshMenu,
+      refreshSchool,
+      refreshShopping,
+      refreshSleep,
+      scheduleRefresh,
+    ],
+  );
+
   const handleCloseAgentChat = useCallback(() => {
     setShowAgent(false);
     queueMicrotask(() => {
@@ -748,40 +874,86 @@ export function HomeClient({
 
   useKoreRealtime(
     useCallback(
-      (table) => {
+      (change) => {
         queueMicrotask(() => {
-          if (table === "domains") void loadDomains();
-          else if (table === "shopping_items") void loadDomains();
-          else if (table === "cleaning_tasks") void loadDomains();
-          else if (table === "menu_items") void loadDomains();
-          else if (table === "sleep_logs" || table === "sleep_sessions") void loadDomains();
-          else if (table === "school_events") void loadDomains();
-          else if (table === "calendar_events") void loadAgenda();
-          else if (table === "expenses") void loadExpenses();
-          else if (table === "health_records") void loadSalud();
-          else if (table === "kore_notes") void loadCorcho();
-          else if (table === "profiles") void loadProfiles();
+          emitKoreRemoteChanges([change]);
+          if (change.table === "shopping_items") {
+            const payload = {
+              event: change.event,
+              id: change.id,
+              row: change.event === "DELETE" ? null : readShoppingItem(change.row),
+            };
+            if (!mergeRemoteRow([], payload, "start")) {
+              refreshTable("shopping_items");
+              return;
+            }
+            setShoppingItems((prev) => mergeRemoteRow(prev, payload, "start") ?? prev);
+            return;
+          }
+          if (change.table === "calendar_events") {
+            const row = change.event === "DELETE" ? null : readCalendarEvent(change.row);
+            const mapped = row ? calendarRowToEvent(row) : null;
+            if (change.event !== "DELETE" && mapped && !withinAgendaWindow(mapped.fecha)) {
+              setAgendaEvents((prev) => prev.filter((event) => event.id !== mapped.id));
+              return;
+            }
+            const payload = { event: change.event, id: change.id, row: mapped };
+            if (!mergeRemoteRow([], payload)) {
+              refreshTable("calendar_events");
+              return;
+            }
+            setAgendaEvents((prev) => sortAgendaEvents(mergeRemoteRow(prev, payload) ?? prev));
+            return;
+          }
+          if (change.table === "health_records") {
+            if (change.event === "DELETE") {
+              if (!change.id) {
+                refreshTable("health_records");
+                return;
+              }
+              const deletedId = change.id;
+              setSalud((prev) => removeSaludItem(prev, deletedId));
+              return;
+            }
+            const record = readHealthRecord(change.row);
+            if (!record) {
+              refreshTable("health_records");
+              return;
+            }
+            setSalud((prev) => mergeDynamicHealth(prev, record));
+            const linked = calendarEventFromHealthRecord(record);
+            if (linked && withinAgendaWindow(linked.date)) {
+              setAgendaEvents((prev) => sortAgendaEvents(upsertById(prev, calendarRowToEvent(linked))));
+            }
+            return;
+          }
+          if (change.table === "kore_notes") {
+            if (change.event === "DELETE" && change.id) {
+              setCorchoMessages((prev) => prev.filter((message) => message.id !== change.id));
+              return;
+            }
+            const note = readKoreNote(change.row);
+            if (!note) {
+              refreshTable("kore_notes");
+              return;
+            }
+            const [item] = mapKoreNotesToCorchoMessages([note], safeInitialProfiles);
+            if (!item) return;
+            setCorchoMessages((prev) => [item, ...prev.filter((message) => message.id !== item.id)].slice(0, 3));
+            return;
+          }
+          refreshTable(change.table);
         });
       },
-      [loadAgenda, loadCorcho, loadDomains, loadExpenses, loadProfiles, loadSalud],
+      [refreshTable, safeInitialProfiles],
     ),
   );
 
   useEffect(() => {
     return onKoreUpdate((tables) => {
-      if (tables.includes("calendar_events")) void loadAgenda();
-      if (tables.includes("health_records")) void loadSalud();
-      if (tables.includes("expenses")) void loadExpenses();
-      if (tables.includes("kore_notes")) void loadCorcho();
-      if (tables.includes("domains")) void loadDomains();
-      if (tables.includes("shopping_items")) void loadDomains();
-      if (tables.includes("cleaning_tasks")) void loadDomains();
-      if (tables.includes("menu_items")) void loadDomains();
-      if (tables.includes("sleep_logs") || tables.includes("sleep_sessions")) void loadDomains();
-      if (tables.includes("school_events")) void loadDomains();
-      if (tables.includes("profiles")) void loadProfiles();
+      for (const table of tables) refreshTable(table);
     });
-  }, [loadAgenda, loadCorcho, loadDomains, loadExpenses, loadProfiles, loadSalud]);
+  }, [refreshTable]);
 
   useEffect(() => {
     if (!activeDomainName) {
@@ -808,9 +980,19 @@ export function HomeClient({
     };
   }, [activeDomainName, domains]);
 
+  const visibleDomains = useMemo(
+    () =>
+      domains.map((domain) => {
+        if (domain.name.toLowerCase() === "compras") return enrichComprasDomainFromShoppingItems(domain, optimisticShopping);
+        if (domain.name === "Limpieza") return enrichLimpiezaDomain(domain, cleaningTasks);
+        return domain;
+      }),
+    [cleaningTasks, domains, optimisticShopping],
+  );
+
   const activeDomain = useMemo(
-    () => (activeDomainName ? domains.find((d) => d.name === activeDomainName) ?? null : null),
-    [activeDomainName, domains],
+    () => (activeDomainName ? visibleDomains.find((d) => d.name === activeDomainName) ?? null : null),
+    [activeDomainName, visibleDomains],
   );
   const economia = useMemo(() => {
     const now = new Date();
@@ -842,42 +1024,37 @@ export function HomeClient({
     return Object.values(salud).reduce((acc, member) => acc + member.citas.length + member.medicaciones.length, 0);
   }, [salud]);
 
-  const sortAgendaEvents = useCallback((list: KoreAgendaEvent[]) => {
-    return [...list].sort((a, b) => {
-      const da = (a.fecha ?? "").localeCompare(b.fecha ?? "");
-      if (da !== 0) return da;
-      return (a.hora ?? "").localeCompare(b.hora ?? "");
-    });
-  }, []);
-
   const handleCalendarAddEvent = useCallback(
-    async (draft: CalendarEventDraft) => {
-      try {
-        const row = await addCalendarEvent({
-          title: draft.titulo,
-          date: draft.fecha,
-          time: draft.hora?.trim().length ? draft.hora : "",
-          created_by: familyContext.currentUser?.id ?? initialProfiles[0]?.id ?? "",
+    (draft: CalendarEventDraft) => {
+      const id = crypto.randomUUID();
+      const pending: AgendaView = {
+        id,
+        titulo: draft.titulo,
+        fecha: draft.fecha,
+        hora: draft.hora?.trim().length ? draft.hora : null,
+        pending: true,
+      };
+      return new Promise<KoreAgendaEvent>((resolve, reject) => {
+        startTransition(async () => {
+          applyAgenda({ type: "add", item: pending });
+          try {
+            const row = await addCalendarEvent({
+              id,
+              title: draft.titulo,
+              date: draft.fecha,
+              time: draft.hora?.trim().length ? draft.hora : "",
+              created_by: familyContext.currentUser?.id ?? initialProfiles[0]?.id ?? "",
+            });
+            const ev = calendarRowToEvent(row);
+            setAgendaEvents((prev) => sortAgendaEvents(upsertById(prev, ev)));
+            resolve(ev);
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error("No se pudo guardar el evento."));
+          }
         });
-        const ev = calendarRowToEvent(row);
-        setAgendaEvents((prev) => {
-          return sortAgendaEvents([...prev, ev]);
-        });
-        return ev;
-      } catch {
-        const ev: KoreAgendaEvent = {
-          id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `ev_${Date.now()}`,
-          titulo: draft.titulo,
-          fecha: draft.fecha,
-          hora: draft.hora?.trim().length ? draft.hora : null,
-        };
-        setAgendaEvents((prev) => {
-          return sortAgendaEvents([...prev, ev]);
-        });
-        return ev;
-      }
+      });
     },
-    [sortAgendaEvents],
+    [applyAgenda, familyContext.currentUser, initialProfiles],
   );
 
   const handleCalendarUpdateEvent = useCallback(
@@ -888,31 +1065,20 @@ export function HomeClient({
         prev.map((e) =>
           e.id === id ? { ...e, titulo: draft.titulo, hora: draft.hora?.trim().length ? draft.hora : null } : e,
         );
-      try {
-        await updateCalendarEvent(id, {
-          title: draft.titulo,
-          date: fecha,
-          time: draft.hora?.trim().length ? draft.hora! : "",
-        });
-        setAgendaEvents((prev) => nextLocal(prev));
-      } catch {
-        setAgendaEvents((prev) => nextLocal(prev));
-      }
+      await updateCalendarEvent(id, {
+        title: draft.titulo,
+        date: fecha,
+        time: draft.hora?.trim().length ? draft.hora! : "",
+      });
+      setAgendaEvents((prev) => nextLocal(prev));
     },
     [agendaEvents],
   );
 
-  const handleCalendarDeleteEvent = useCallback(
-    async (id: string) => {
-      try {
-        await deleteCalendarEvent(id);
-      } catch {
-        return;
-      }
-      setAgendaEvents((prev) => prev.filter((e) => e.id !== id));
-    },
-    [],
-  );
+  const handleCalendarDeleteEvent = useCallback(async (id: string) => {
+    await deleteCalendarEvent(id);
+    setAgendaEvents((prev) => prev.filter((e) => e.id !== id));
+  }, []);
 
   const handleSaveDomain = async (next: Pick<DomainItem, "owner" | "state" | "notes">) => {
     if (!activeDomainName) return;
@@ -962,17 +1128,17 @@ export function HomeClient({
 
   const homeDate = useMemo(() => formatHomeDate(new Date()), []);
   const greeting = greetingFor(familyContext.currentUser?.name);
-  const todayAgenda = useMemo(() => buildTodayAgenda(agendaEvents, new Date()), [agendaEvents]);
+  const todayAgenda = useMemo(() => buildTodayAgenda(optimisticAgenda, new Date()), [optimisticAgenda]);
   const pending = useMemo(
     () =>
       buildPendingRows({
-        shopping: shoppingItems,
+        shopping: optimisticShopping,
         cleaning: cleaningTasks,
         note: corchoMessages[0]
           ? { id: corchoMessages[0].id, title: corchoMessages[0].text, subtitle: corchoMessages[0].who }
           : null,
       }),
-    [cleaningTasks, corchoMessages, shoppingItems],
+    [cleaningTasks, corchoMessages, optimisticShopping],
   );
 
   const openDomainByName = useCallback(
@@ -999,21 +1165,111 @@ export function HomeClient({
         setTab("corcho");
         return;
       }
+      if (row.kind === "shopping") {
+        setActionError("");
+        startTransition(async () => {
+          applyShopping({ type: "patch", id: row.id, patch: { completed: true, pending: true } });
+          try {
+            await completeShoppingItem(row.id);
+            setShoppingItems((prev) => prev.map((item) => (item.id === row.id ? { ...item, completed: true } : item)));
+          } catch {
+            setActionError("No se pudo completar la compra. Se ha deshecho.");
+          }
+        });
+        return;
+      }
       try {
-        if (row.kind === "shopping") {
-          setShoppingItems((prev) => prev.map((item) => (item.id === row.id ? { ...item, completed: true } : item)));
-          await completeShoppingItem(row.id);
-          emitKoreUpdate(["shopping_items"]);
-        } else {
-          setCleaningTasks((prev) => prev.filter((task) => task.id !== row.id));
-          await completeCleaningTask(row.id);
-          emitKoreUpdate(["cleaning_tasks"]);
-        }
+        setCleaningTasks((prev) => prev.filter((task) => task.id !== row.id));
+        await completeCleaningTask(row.id);
       } catch {
-        void loadDomains();
+        void refreshCleaning();
       }
     },
-    [loadDomains],
+    [applyShopping, refreshCleaning],
+  );
+
+  const addShoppingFromModal = useCallback(
+    (name: string, actorId: string) => {
+      const id = crypto.randomUUID();
+      const draft: ShoppingView = {
+        id,
+        name,
+        quantity: null,
+        category: null,
+        priority: null,
+        completed: false,
+        created_by: actorId,
+        created_at: new Date().toISOString(),
+        pending: true,
+      };
+      setActionError("");
+      return new Promise<void>((resolve, reject) => {
+        startTransition(async () => {
+          applyShopping({ type: "add", item: draft });
+          try {
+            const row = await addShoppingItem({ id, name, created_by: actorId });
+            setShoppingItems((prev) => upsertById(prev, row, "start"));
+            resolve();
+          } catch (error) {
+            setActionError("No se pudo añadir el producto. Se ha deshecho.");
+            reject(error instanceof Error ? error : new Error("No se pudo añadir el producto."));
+          }
+        });
+      });
+    },
+    [applyShopping],
+  );
+
+  const patchShopping = useCallback(
+    (id: string, completed: boolean, run: () => Promise<void>, failure: string) => {
+      setActionError("");
+      startTransition(async () => {
+        applyShopping({ type: "patch", id, patch: { completed, pending: true } });
+        try {
+          await run();
+          setShoppingItems((prev) => prev.map((item) => (item.id === id ? { ...item, completed } : item)));
+        } catch {
+          setActionError(failure);
+        }
+      });
+    },
+    [applyShopping],
+  );
+
+  const removeShopping = useCallback(
+    (id: string) => {
+      setActionError("");
+      startTransition(async () => {
+        applyShopping({ type: "remove", id });
+        try {
+          await deleteShoppingItem(id);
+          setShoppingItems((prev) => prev.filter((item) => item.id !== id));
+        } catch {
+          setActionError("No se pudo eliminar el producto. Se ha deshecho.");
+        }
+      });
+    },
+    [applyShopping],
+  );
+
+  const absorbHealthRecord = useCallback(
+    (record: HealthRecord) => {
+      setSalud((prev) => mergeDynamicHealth(prev, record));
+      const linked = calendarEventFromHealthRecord(record);
+      if (linked && withinAgendaWindow(linked.date)) {
+        setAgendaEvents((prev) => sortAgendaEvents(upsertById(prev, calendarRowToEvent(linked))));
+      }
+    },
+    [],
+  );
+
+  const absorbCorchoNote = useCallback(
+    (note: { id: string; sender_id: string; content: string | null; imageUrls?: string[] }) => {
+      const [item] = mapKoreNotesToCorchoMessages([note], safeInitialProfiles);
+      if (!item) return;
+      setCorchoMessages((prev) => [item, ...prev.filter((message) => message.id !== item.id)].slice(0, 3));
+    },
+    [safeInitialProfiles],
   );
 
   const openCurrentProfile = useCallback(() => {
@@ -1036,6 +1292,11 @@ export function HomeClient({
         }}
       />
       <main className="mx-auto w-full max-w-6xl px-5 pt-20 pb-8 md:px-8">
+        {actionError ? (
+          <p role="alert" className="mb-3 rounded-lg border border-red-400/40 bg-red-500/15 px-3 py-2 text-sm text-red-100">
+            {actionError}
+          </p>
+        ) : null}
         {tab === "inicio" ? (
           <InicioView
             greeting={greeting}
@@ -1044,7 +1305,7 @@ export function HomeClient({
             agenda={todayAgenda}
             pendingMobile={pending.mobile}
             pendingDesktop={pending.desktop}
-            domains={domains}
+            domains={visibleDomains}
             showInvite={showPartnerInviteWidget}
             inviteCode={initialInviteCode}
             inviteCopied={inviteCopied}
@@ -1072,7 +1333,7 @@ export function HomeClient({
         ) : null}
         {tab === "casa" ? (
           <CasaView
-            domains={domains}
+            domains={visibleDomains}
             onOpenDomain={openDomainByName}
             onDeactivateDomain={(id) => void handleDeactivateCorner(id)}
             onAddCorner={openAddCornerModal}
@@ -1101,6 +1362,8 @@ export function HomeClient({
               currentUserId={currentUserId}
               partnerUserId={corchoPartner?.id ?? ""}
               recipientName={corchoPartner?.name ?? "tu pareja"}
+              onNoteSaved={absorbCorchoNote}
+              onNoteDeleted={(id) => setCorchoMessages((prev) => prev.filter((message) => message.id !== id))}
             />
           </div>
         ) : null}
@@ -1132,6 +1395,7 @@ export function HomeClient({
         <SaludModal
           onClose={() => setShowSalud(false)}
           profiles={safeInitialProfiles ?? []}
+          onRecordSaved={absorbHealthRecord}
           onChange={(next) => {
             const mapped: DynamicSaludData = {};
             for (const profile of safeInitialProfiles ?? []) {
@@ -1156,14 +1420,32 @@ export function HomeClient({
         <SaludResumenModal
           profiles={safeInitialProfiles}
           onClose={() => setShowSaludResumen(false)}
-          onChange={() => void loadSalud()}
+          onRecordSaved={absorbHealthRecord}
+          onChange={(next) => {
+            const mapped: DynamicSaludData = {};
+            for (const profile of safeInitialProfiles ?? []) {
+              const legacy = next[profile.id];
+              if (!legacy) continue;
+              mapped[profile.id] = {
+                citas: (legacy.citas ?? []).map((c) => ({ ...c })),
+                medicaciones: (legacy.medicaciones ?? []).map((m) => ({
+                  id: m.id,
+                  descripcion: `${m.nombre} ${m.dosis}`.trim(),
+                  fecha: (m.proximaToma ?? "").split("T")[0] ?? "",
+                  hora: ((m.proximaToma ?? "").split("T")[1] ?? "").slice(0, 5),
+                  lugar: "",
+                })),
+              };
+            }
+            setSalud(mapped);
+          }}
         />
       ) : null}
       {showPerfil && usuarioPerfil ? (
         <PerfilModal
           usuario={usuarioPerfil}
           onClose={() => setShowPerfil(false)}
-          domains={domains}
+          domains={visibleDomains}
           saludMember={salud[usuarioPerfil.id] ?? emptyHealthMember()}
           stressLevel={stressByProfileId[usuarioPerfil.id] ?? 5}
           onStressChange={(n) => {
@@ -1198,6 +1480,24 @@ export function HomeClient({
           historyEntries={domainHistoryList}
           historyReadOnly
           profiles={safeInitialProfiles}
+          shoppingItems={optimisticShopping}
+          onAddShoppingItem={(name) => {
+            const actor = familyContext.currentUser?.id ?? currentUserId;
+            if (!actor) return Promise.reject(new Error("No hay sesión"));
+            return addShoppingFromModal(name, actor);
+          }}
+          onCompleteShoppingItem={(id) =>
+            patchShopping(id, true, () => completeShoppingItem(id), "No se pudo completar la compra. Se ha deshecho.")
+          }
+          onReactivateShoppingItem={(id) =>
+            patchShopping(
+              id,
+              false,
+              () => reactivateShoppingItem(id),
+              "No se pudo reactivar el producto. Se ha deshecho.",
+            )
+          }
+          onDeleteShoppingItem={removeShopping}
         />
       ) : null}
 
@@ -1208,7 +1508,7 @@ export function HomeClient({
             setCalendarInitialDate(null);
             setCalendarFocusComposer(false);
           }}
-          events={agendaEvents}
+          events={optimisticAgenda}
           initialDate={calendarInitialDate}
           focusComposer={calendarFocusComposer}
           onAddEvent={handleCalendarAddEvent}

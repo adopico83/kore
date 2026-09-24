@@ -6,6 +6,10 @@ const mockCreateClient = vi.fn();
 vi.mock("@/lib/family-context", () => ({
   getScopedFamilyId: () => mockGetScopedFamilyId(),
   getScopedUserId: vi.fn(),
+  getScopedIdentity: async () => ({
+    userId: "user-1",
+    familyId: await mockGetScopedFamilyId(),
+  }),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({

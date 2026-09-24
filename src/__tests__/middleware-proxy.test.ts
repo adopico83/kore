@@ -122,6 +122,40 @@ describe("proxy route protection", () => {
     expect(res.headers.get("location")).toBe("http://localhost/");
   });
 
+  it("un server action sin sesión sigue yendo a /login", async () => {
+    mockSupabaseForSession(null);
+    const { proxy } = await import("@/proxy");
+    const req = new NextRequest("http://localhost/", {
+      method: "POST",
+      headers: { "next-action": "abc" },
+    });
+
+    const res = await proxy(req);
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost/login");
+  });
+
+  it("un server action con sesión no lee profiles", async () => {
+    const from = vi.fn();
+    mockCreateServerClient.mockReturnValue({
+      auth: {
+        getSession: vi.fn(async () => ({ data: { session: { user: { id: "u1" } } } })),
+      },
+      from,
+    });
+    const { proxy } = await import("@/proxy");
+    const req = new NextRequest("http://localhost/", {
+      method: "POST",
+      headers: { "next-action": "abc" },
+    });
+
+    const res = await proxy(req);
+
+    expect(res.status).toBe(200);
+    expect(from).not.toHaveBeenCalled();
+  });
+
   it("onboarding pendiente deja /onboarding", async () => {
     mockSupabaseForSession({ user: { id: "u1" } }, { familyId: "f1", onboardingStep: "pending" });
     const { proxy } = await import("@/proxy");
