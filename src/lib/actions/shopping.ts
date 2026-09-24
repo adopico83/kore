@@ -1,6 +1,6 @@
 "use server";
 
-import { getScopedFamilyId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
 import {
   addShoppingItem as dbAddShoppingItem,
   clearCompletedItems as dbClearCompletedItems,
@@ -10,15 +10,9 @@ import {
   reactivateShoppingItem as dbReactivateShoppingItem,
 } from "@/lib/kore-db";
 
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
-
 export async function getShoppingItems() {
-  const familyId = await requireFamilyId();
-  return dbGetShoppingItems(familyId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetShoppingItems(client, familyId);
 }
 
 export async function addShoppingItem(data: {
@@ -28,26 +22,26 @@ export async function addShoppingItem(data: {
   priority?: string;
   created_by?: string;
 }) {
-  const familyId = await requireFamilyId();
-  return dbAddShoppingItem(familyId, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbAddShoppingItem(client, familyId, data);
 }
 
 export async function completeShoppingItem(id: string) {
-  const familyId = await requireFamilyId();
-  return dbCompleteShoppingItem(familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbCompleteShoppingItem(client, familyId, id);
 }
 
 export async function reactivateShoppingItem(id: string) {
-  const familyId = await requireFamilyId();
-  return dbReactivateShoppingItem(familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbReactivateShoppingItem(client, familyId, id);
 }
 
 export async function deleteShoppingItem(id: string) {
-  const familyId = await requireFamilyId();
-  return dbDeleteShoppingItem(familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbDeleteShoppingItem(client, familyId, id);
 }
 
 export async function clearCompletedItems() {
-  const familyId = await requireFamilyId();
-  return dbClearCompletedItems(familyId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbClearCompletedItems(client, familyId);
 }

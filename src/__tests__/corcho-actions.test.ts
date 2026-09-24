@@ -21,10 +21,10 @@ const mockDb = {
 
 vi.mock("@/lib/kore-db", () => mockDb);
 
-const mockAdmin = { from: vi.fn() };
+const mockSessionClient = { from: vi.fn() };
 
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => mockAdmin,
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(async () => mockSessionClient),
 }));
 
 function jpegFile(name = "foto.jpg"): File {
@@ -73,7 +73,7 @@ describe("addCorchoNote", () => {
     await addCorchoNote(formData);
 
     expect(mockDb.insertKoreNote).toHaveBeenCalledWith(
-      mockAdmin,
+      mockSessionClient,
       "fam-1",
       expect.objectContaining({
         sender_id: "user-1",
@@ -82,7 +82,7 @@ describe("addCorchoNote", () => {
       }),
     );
     expect(mockDb.saveCorchoNotePhotos).toHaveBeenCalledWith(
-      mockAdmin,
+      mockSessionClient,
       "fam-1",
       "note-1",
       [expect.any(Uint8Array)],
@@ -92,6 +92,17 @@ describe("addCorchoNote", () => {
   it("borra la nota y sus fotos", async () => {
     const { deleteCorchoNote } = await import("@/lib/actions/corcho");
     await deleteCorchoNote("note-1");
-    expect(mockDb.deleteKoreNote).toHaveBeenCalledWith(mockAdmin, "fam-1", "note-1");
+    expect(mockDb.deleteKoreNote).toHaveBeenCalledWith(mockSessionClient, "fam-1", "note-1");
+  });
+
+  it("adjunta las URLs firmadas con el cliente de sesión", async () => {
+    mockDb.getKoreNotes.mockResolvedValueOnce([{ id: "note-1" }]);
+    mockDb.getCorchoPhotoUrlsByNote.mockResolvedValueOnce({ "note-1": ["https://signed.example/a.jpg"] });
+    const { getKoreNotes } = await import("@/lib/actions/corcho");
+    await expect(getKoreNotes()).resolves.toEqual([
+      { id: "note-1", imageUrls: ["https://signed.example/a.jpg"] },
+    ]);
+    expect(mockDb.getKoreNotes).toHaveBeenCalledWith(mockSessionClient, "fam-1", undefined);
+    expect(mockDb.getCorchoPhotoUrlsByNote).toHaveBeenCalledWith(mockSessionClient, "fam-1", ["note-1"]);
   });
 });

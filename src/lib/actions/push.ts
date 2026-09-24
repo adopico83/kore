@@ -1,16 +1,16 @@
 "use server";
 
-import { getScopedFamilyId, getScopedUserId } from "@/lib/family-context";
+import { getScopedUserId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
 import { deleteSubscription, saveSubscription, type PushSubscriptionJSON } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function subscribeToNotificationsAction(
   subscription: PushSubscriptionJSON,
   deviceType?: string | null,
 ) {
-  const familyId = await getScopedFamilyId();
+  const { familyId, client } = await requireFamilyDb();
   const userId = await getScopedUserId();
-  if (!familyId || !userId) throw new Error("No hay sesión o familia.");
+  if (!userId) throw new Error("No hay sesión o familia.");
 
   const endpoint = subscription?.endpoint?.trim() ?? "";
   const p256dh = subscription?.keys?.p256dh?.trim() ?? "";
@@ -21,9 +21,8 @@ export async function subscribeToNotificationsAction(
     throw new Error("Suscripción inválida.");
   }
 
-  const admin = createAdminClient();
   return saveSubscription(
-    admin,
+    client,
     userId,
     familyId,
     { endpoint, keys: { p256dh, auth } },
@@ -32,8 +31,8 @@ export async function subscribeToNotificationsAction(
 }
 
 export async function unsubscribeFromNotificationsAction() {
+  const { client } = await requireFamilyDb();
   const userId = await getScopedUserId();
   if (!userId) throw new Error("No hay sesión.");
-  const admin = createAdminClient();
-  await deleteSubscription(admin, userId);
+  await deleteSubscription(client, userId);
 }

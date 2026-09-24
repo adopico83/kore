@@ -2,14 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FAMILY_ID, getSubscriptionsByFamily, saveSubscription } from "@/lib/kore-db";
 
-const { mockGetBrowserClient } = vi.hoisted(() => ({
-  mockGetBrowserClient: vi.fn(),
-}));
-
-vi.mock("@/lib/supabase/client", () => ({
-  getBrowserClient: mockGetBrowserClient,
-}));
-
 describe("push_subscriptions kore-db", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -109,9 +101,9 @@ describe("push_subscriptions kore-db", () => {
     const eq = vi.fn(() => ({ order }));
     const select = vi.fn(() => ({ eq }));
     const from = vi.fn(() => ({ select }));
-    mockGetBrowserClient.mockReturnValue({ from });
+    const client = { from };
 
-    const out = await getSubscriptionsByFamily(FAMILY_ID);
+    const out = await getSubscriptionsByFamily(client as never, FAMILY_ID);
 
     expect(from).toHaveBeenCalledWith("push_subscriptions");
     expect(eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
@@ -123,11 +115,11 @@ describe("push_subscriptions kore-db", () => {
 
   it("getSubscriptionsByFamily devuelve [] si Supabase falla", async () => {
     const order = vi.fn(async () => ({ data: null, error: { message: "boom" } }));
-    mockGetBrowserClient.mockReturnValue({
+    const client = {
       from: () => ({ select: () => ({ eq: () => ({ order }) }) }),
-    });
+    };
 
-    const out = await getSubscriptionsByFamily(FAMILY_ID);
+    const out = await getSubscriptionsByFamily(client as never, FAMILY_ID);
     expect(out).toEqual([]);
   });
 });

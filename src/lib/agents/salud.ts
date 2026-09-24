@@ -8,7 +8,6 @@ import {
   getHealthRecords,
   updateHealthRecordRow,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildCitaHealthInsert,
   buildMedHealthInsert,
@@ -205,8 +204,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     return { error: "Esta petición no es competencia del subagente de Salud." };
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-  const { familyId, profiles } = ctx;
-  const admin = createAdminClient();
+  const { familyId, profiles, db } = ctx;
 
   switch (toolName) {
     case "add_appointment": {
@@ -224,7 +222,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         hora,
         lugar,
       });
-      const row = await addHealthRecordRow(admin, familyId, insert);
+      const row = await addHealthRecordRow(db, familyId, insert);
       return { ok: true, record: row };
     }
     case "add_medication": {
@@ -240,7 +238,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         frecuenciaHoras: frec,
         proximaToma: nextDose,
       });
-      const row = await addHealthRecordRow(admin, familyId, insert);
+      const row = await addHealthRecordRow(db, familyId, insert);
       return { ok: true, record: row };
     }
     case "log_medication_given": {
@@ -248,7 +246,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const medName = String(a.medication ?? "").trim().toLowerCase();
       const timeNote = String(a.time ?? "").trim();
       if (!patientId || !medName) return { error: "Faltan campos o paciente no reconocido." };
-      const rows = await getHealthRecords(familyId);
+      const rows = await getHealthRecords(db, familyId);
       const cand = rows.filter((r) => {
         if (r.type !== "medication") return false;
         const bucket = resolveHealthBucketPatientId(r, profiles);
@@ -266,13 +264,13 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const target = cand[0];
       if (!target) return { error: "No se encontró medicación coincidente." };
       const next = new Date(Date.now() + 8 * 3600000).toISOString();
-      await updateHealthRecordRow(admin, familyId, target.id, {
+      await updateHealthRecordRow(db, familyId, target.id, {
         next_dose_at: next,
       });
       return { ok: true, updated_id: target.id, logged_at: timeNote, next_dose_at: next };
     }
     case "get_health_records": {
-      const rows = await getHealthRecords(familyId);
+      const rows = await getHealthRecords(db, familyId);
       const filterId = a.patient ? resolvePatientId(String(a.patient), profiles) : null;
       if (filterId) {
         return {
@@ -285,13 +283,13 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     case "complete_appointment": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await updateHealthRecordRow(admin, familyId, id, { status: "completed" });
+      await updateHealthRecordRow(db, familyId, id, { status: "completed" });
       return { ok: true, id };
     }
     case "delete_health_record": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await deleteHealthRecordRow(admin, familyId, id);
+      await deleteHealthRecordRow(db, familyId, id);
       return { ok: true, deleted: id };
     }
     default:

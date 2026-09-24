@@ -82,11 +82,11 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const value = String(a.value ?? "").trim();
       const category = String(a.category ?? "sugerencia");
       if (!key || !value) return { error: "Faltan key o value." };
-      await upsertAgentMemory(ctx.familyId, key, value, category);
+      await upsertAgentMemory(ctx.db, ctx.familyId, key, value, category);
       return { ok: true, key, category };
     }
     case "get_patterns": {
-      const rows = await getAgentMemory(ctx.familyId);
+      const rows = await getAgentMemory(ctx.db, ctx.familyId);
       const cat = a.category ? String(a.category) : null;
       const filtered = cat ? rows.filter((r) => r.category === cat) : rows;
       return { ok: true, patterns: filtered };
@@ -97,13 +97,13 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       if (!insight) return { error: "Falta insight." };
       const key = `${INSIGHT_PREFIX}${Date.now()}`;
       const value = JSON.stringify({ insight, context, at: new Date().toISOString() });
-      await upsertAgentMemory(ctx.familyId, key, value, "sugerencia");
+      await upsertAgentMemory(ctx.db, ctx.familyId, key, value, "sugerencia");
       return { ok: true, key };
     }
     case "get_relevant_memories": {
       const contextNeedle = String(a.context ?? "").trim().toLowerCase();
       if (!contextNeedle) return { error: "Falta context." };
-      const rows = await getAgentMemory(ctx.familyId);
+      const rows = await getAgentMemory(ctx.db, ctx.familyId);
       const relevant = rows.filter(
         (r) =>
           r.key.toLowerCase().includes(contextNeedle) ||

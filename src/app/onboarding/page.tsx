@@ -3,8 +3,12 @@
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getBrowserClient } from "@/lib/supabase/client";
-import { completeOnboardingAction } from "@/lib/actions/onboarding";
+import {
+  completeOnboardingAction,
+  getOnboardingAccess,
+  resolveOnboardingDomainIds,
+  saveOnboardingMemory,
+} from "@/lib/actions/onboarding";
 import { parseFamilyPeopleForOnboarding } from "@/lib/actions/extract-family-members";
 import { BASE_DOMAINS, type DomainName } from "@/lib/domains-catalog";
 import { OnboardingFamilyGate } from "./OnboardingFamilyGate";
@@ -25,59 +29,6 @@ const NEWBORN_CRITICAL_DOMAIN_OPTIONS = BASE_DOMAINS.filter((domain) => domain.i
   (domain) => domain.name,
 ) as DomainName[];
 
-async function getSessionContext() {
-  const supabase = getBrowserClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-  if (userError || !user) throw new Error(userError?.message || "No hay sesión activa.");
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("family_id")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (profileError || !profile?.family_id) {
-    throw new Error(profileError?.message || "No se pudo resolver la familia actual.");
-  }
-
-  return { familyId: profile.family_id };
-}
-
-async function resolveDomainIdsByNames(familyId: string, names: string[]): Promise<string[]> {
-  const supabase = getBrowserClient();
-  const uniqueNames = Array.from(new Set(names));
-  if (uniqueNames.length === 0) return [];
-
-  const { data: existingRows, error: selectError } = await supabase
-    .from("domains")
-    .select("id,name")
-    .eq("family_id", familyId)
-    .in("name", uniqueNames);
-  if (selectError) throw new Error(selectError.message || "No se pudieron consultar dominios.");
-
-  const idsByName = new Map((existingRows ?? []).map((row) => [row.name, row.id]));
-  const missingNames = uniqueNames.filter((name) => !idsByName.has(name));
-  if (missingNames.length > 0) {
-    throw new Error(`Faltan dominios base: ${missingNames.join(", ")}.`);
-  }
-  return uniqueNames.map((name) => idsByName.get(name)!).filter(Boolean);
-}
-
-async function saveMemory(familyId: string, key: string, value: string, category = "onboarding") {
-  const supabase = getBrowserClient();
-  const now = new Date().toISOString();
-  const { error } = await supabase.from("agent_memory").insert({
-    family_id: familyId,
-    key: `${key}_${Date.now()}`,
-    value,
-    category,
-    created_at: now,
-    updated_at: now,
-  });
-  if (error) throw new Error(error.message || "No se pudo guardar memoria.");
-}
 
 async function parseFamilyPeople(input: string): Promise<{ partnerName: string; childrenNames: string[] }> {
   return parseFamilyPeopleForOnboarding(input);
@@ -128,16 +79,8 @@ function OnboardingPageContent() {
 
   useEffect(() => {
     void (async () => {
-      const supabase = getBrowserClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        setFamilyAccess("none");
-        return;
-      }
-      const { data: profile } = await supabase.from("profiles").select("family_id").eq("id", user.id).maybeSingle();
-      setFamilyAccess(profile?.family_id ? "ok" : "none");
+      const access = await getOnboardingAccess();
+      setFamilyAccess(access);
     })();
   }, []);
 
@@ -184,7 +127,6 @@ function OnboardingPageContent() {
     setInputValue("");
 
     try {
-      const { familyId } = await getSessionContext();
       const orcInstruction = [
         "Contexto onboarding recién nacido:",
         text,
@@ -200,10 +142,9 @@ function OnboardingPageContent() {
       const data = (await res.json().catch(() => ({}))) as { reply?: string; respuesta?: string; error?: string };
       if (!res.ok) throw new Error(data.error || "No se pudo contactar con Kore.");
 
-      const selectedDomainIds = await resolveDomainIdsByNames(familyId, NEWBORN_CRITICAL_DOMAIN_OPTIONS);
+      const selectedDomainIds = await resolveOnboardingDomainIds(NEWBORN_CRITICAL_DOMAIN_OPTIONS);
       const { partnerName, childrenNames } = await parseFamilyPeople(text);
       const result = await completeOnboardingAction({
-        familyId,
         partnerName,
         childrenNames,
         selectedDomainIds,
@@ -212,7 +153,7 @@ function OnboardingPageContent() {
         setError(result.error);
         return;
       }
-      await saveMemory(familyId, "newborn_context", text, "onboarding");
+      await saveOnboardingMemory("newborn_context", text, "onboarding");
 
       appendAssistant(
         (typeof data.reply === "string" && data.reply) ||
@@ -271,12 +212,10 @@ function OnboardingPageContent() {
       appendUser(routineText);
       setInputValue("");
 
-      const { familyId } = await getSessionContext();
-      const selectedDomainIds = await resolveDomainIdsByNames(familyId, guidedAnswers.selectedDomains);
+      const selectedDomainIds = await resolveOnboardingDomainIds(guidedAnswers.selectedDomains);
       const { partnerName, childrenNames } = await parseFamilyPeople(guidedAnswers.familyPeople);
 
       const result = await completeOnboardingAction({
-        familyId,
         partnerName,
         childrenNames,
         selectedDomainIds,
@@ -285,8 +224,8 @@ function OnboardingPageContent() {
         setError(result.error);
         return;
       }
-      await saveMemory(familyId, "guided_people", guidedAnswers.familyPeople, "onboarding");
-      await saveMemory(familyId, "guided_routines", routineText, "onboarding");
+      await saveOnboardingMemory("guided_people", guidedAnswers.familyPeople, "onboarding");
+      await saveOnboardingMemory("guided_routines", routineText, "onboarding");
 
       setGuidedAnswers((prev) => ({ ...prev, routineInfo: routineText }));
       setGuidedStep(4);

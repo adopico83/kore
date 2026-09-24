@@ -1,13 +1,41 @@
 "use server";
 
+import { getScopedFamilyId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
+import { getDomains, upsertAgentMemory } from "@/lib/kore-db";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type CompleteOnboardingInput = {
-  familyId: string;
   partnerName: string;
   childrenNames: string[];
   selectedDomainIds: string[];
 };
+
+export async function getOnboardingAccess(): Promise<"none" | "ok"> {
+  const familyId = await getScopedFamilyId();
+  return familyId ? "ok" : "none";
+}
+
+export async function resolveOnboardingDomainIds(names: string[]): Promise<string[]> {
+  const uniqueNames = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)));
+  if (uniqueNames.length === 0) return [];
+  const { familyId, client } = await requireFamilyDb();
+  const rows = await getDomains(client, familyId);
+  const idsByName = new Map(rows.map((row) => [row.name, row.id]));
+  const missingNames = uniqueNames.filter((name) => !idsByName.has(name));
+  if (missingNames.length > 0) {
+    throw new Error(`Faltan dominios base: ${missingNames.join(", ")}.`);
+  }
+  return uniqueNames.map((name) => idsByName.get(name)!).filter(Boolean);
+}
+
+export async function saveOnboardingMemory(key: string, value: string, category = "onboarding"): Promise<void> {
+  const cleanKey = key.trim();
+  const cleanValue = value.trim();
+  if (!cleanKey || !cleanValue) throw new Error("No se pudo guardar memoria.");
+  const { familyId, client } = await requireFamilyDb();
+  await upsertAgentMemory(client, familyId, `${cleanKey}_${Date.now()}`, cleanValue, category);
+}
 
 /** Valores permitidos por `profiles_role_check` en DB: exactamente estos literales. */
 const PROFILE_ROLE_MEMBER = "member" as const;
@@ -25,22 +53,22 @@ type ProfileSnapshot = {
 type CompleteOnboardingResult = { success: true } | { success: false; error: string };
 
 export async function completeOnboardingAction({
-  familyId,
   partnerName,
   childrenNames,
   selectedDomainIds,
 }: CompleteOnboardingInput): Promise<CompleteOnboardingResult> {
+  const sessionFamilyId = await getScopedFamilyId();
+  if (!sessionFamilyId) {
+    return { success: false, error: "No family context" };
+  }
+  const normalizedFamilyId = sessionFamilyId;
+
   console.log("[completeOnboardingAction] start", {
-    familyId,
+    familyId: normalizedFamilyId,
     partnerName,
     childrenNames,
     selectedDomainIds,
   });
-
-  const normalizedFamilyId = familyId.trim();
-  if (!normalizedFamilyId) {
-    return { success: false, error: "familyId es obligatorio." };
-  }
 
   if (!Array.isArray(childrenNames)) {
     return { success: false, error: "childrenNames debe ser string[] válido." };

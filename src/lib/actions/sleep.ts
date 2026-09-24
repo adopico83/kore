@@ -1,23 +1,15 @@
 "use server";
 
-import { getScopedFamilyId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
 import {
   addSleepSession as dbAddSleepSession,
   deleteSleepSession as dbDeleteSleepSession,
   getSleepSessions as dbGetSleepSessions,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
-
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
 
 export async function getSleepSessions(days = 14) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbGetSleepSessions(admin, familyId, days);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetSleepSessions(client, familyId, days);
 }
 
 export async function addSleepSession(data: {
@@ -28,13 +20,11 @@ export async function addSleepSession(data: {
   hours?: number | null;
   notes?: string | null;
 }) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbAddSleepSession(admin, familyId, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbAddSleepSession(client, familyId, data);
 }
 
 export async function deleteSleepSession(id: string) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbDeleteSleepSession(admin, familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbDeleteSleepSession(client, familyId, id);
 }

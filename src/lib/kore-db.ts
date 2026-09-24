@@ -20,7 +20,6 @@ import {
   isMissingCorchoPhotosTable,
 } from "@/lib/corcho-photos";
 import type { Database, Json } from "@/types/database";
-import { getBrowserClient } from "@/lib/supabase/client";
 
 export const ANDER_ID = "6204d1a5-bbba-4a01-a9f2-b0742ee0bcd4";
 export const LEIRE_ID = "63c1ffab-4fa1-4953-8d5f-9c5b7e1d5bd4";
@@ -268,24 +267,18 @@ export type KoreDatabase = {
   };
 };
 
-type KoreClient = SupabaseClient<KoreDatabase>;
-
-/** Cliente service role (o equivalente) para server actions / RLS bypass controlado. */
+/** Cliente creado en el servidor: sesión (RLS) o service role. Nunca el anónimo del navegador. */
 export type KoreServerDbClient = SupabaseClient<Database>;
 
 /** @deprecated Usa KoreServerDbClient */
 export type PushSubscriptionsClient = KoreServerDbClient;
 
-function db(): KoreClient {
-  return getBrowserClient();
-}
-
 function throwDb(context: string, error: { message: string } | null) {
   if (error) throw new Error(`${context}: ${error.message}`);
 }
 
-export async function getProfiles(familyId: string): Promise<Profile[]> {
-  const { data, error } = await db()
+export async function getProfiles(client: KoreServerDbClient, familyId: string): Promise<Profile[]> {
+  const { data, error } = await client
     .from("profiles")
     .select("*")
     .eq("family_id", familyId)
@@ -294,9 +287,9 @@ export async function getProfiles(familyId: string): Promise<Profile[]> {
   return data ?? [];
 }
 
-export async function updateStressLevel(familyId: string, userId: string, level: number): Promise<void> {
+export async function updateStressLevel(client: KoreServerDbClient, familyId: string, userId: string, level: number): Promise<void> {
   const stress_level = Math.min(10, Math.max(1, Math.round(level)));
-  const { error } = await db()
+  const { error } = await client
     .from("profiles")
     .update({ stress_level, updated_at: new Date().toISOString() })
     .eq("family_id", familyId)
@@ -304,15 +297,15 @@ export async function updateStressLevel(familyId: string, userId: string, level:
   throwDb("updateStressLevel", error);
 }
 
-export async function getCalendarEvents(familyId: string): Promise<CalendarEventRow[]> {
-  const { data, error } = await db()
+export async function getCalendarEvents(client: KoreServerDbClient, familyId: string): Promise<CalendarEventRow[]> {
+  const { data, error } = await client
     .from("calendar_events")
     .select("*")
     .eq("family_id", familyId)
     .order("date", { ascending: true })
     .order("time", { ascending: true });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as CalendarEventRow[];
 }
 
 export async function addCalendarEvent(
@@ -340,11 +333,12 @@ export async function deleteCalendarEvent(client: KoreServerDbClient, familyId: 
 }
 
 export async function updateCalendarEvent(
+  client: KoreServerDbClient,
   familyId: string,
   id: string,
   data: Partial<Pick<CalendarEventRow, "title" | "date" | "time" | "created_by">>,
 ): Promise<void> {
-  const { error } = await db().from("calendar_events").update(data).eq("family_id", familyId).eq("id", id);
+  const { error } = await client.from("calendar_events").update(data).eq("family_id", familyId).eq("id", id);
   throwDb("updateCalendarEvent", error);
 }
 
@@ -360,8 +354,8 @@ export async function updateCalendarEventRow(
 
 export type HealthRecordInsert = Database["public"]["Tables"]["health_records"]["Insert"];
 
-export async function getHealthRecords(familyId: string, patientId?: string): Promise<HealthRecord[]> {
-  let query = db()
+export async function getHealthRecords(client: KoreServerDbClient, familyId: string, patientId?: string): Promise<HealthRecord[]> {
+  let query = client
     .from("health_records")
     .select("*")
     .eq("family_id", familyId)
@@ -372,8 +366,8 @@ export async function getHealthRecords(familyId: string, patientId?: string): Pr
   return data ?? [];
 }
 
-export async function addHealthRecord(familyId: string, data: HealthRecordInsert): Promise<HealthRecord> {
-  const { data: created, error } = await db()
+export async function addHealthRecord(client: KoreServerDbClient, familyId: string, data: HealthRecordInsert): Promise<HealthRecord> {
+  const { data: created, error } = await client
     .from("health_records")
     .insert({ ...data, family_id: familyId })
     .select("*")
@@ -383,16 +377,17 @@ export async function addHealthRecord(familyId: string, data: HealthRecordInsert
 }
 
 export async function updateHealthRecord(
+  client: KoreServerDbClient,
   familyId: string,
   id: string,
   data: Partial<Omit<HealthRecord, "id" | "created_at">>,
 ): Promise<void> {
-  const { error } = await db().from("health_records").update(data).eq("family_id", familyId).eq("id", id);
+  const { error } = await client.from("health_records").update(data).eq("family_id", familyId).eq("id", id);
   throwDb("updateHealthRecord", error);
 }
 
-export async function deleteHealthRecord(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("health_records").delete().eq("family_id", familyId).eq("id", id);
+export async function deleteHealthRecord(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("health_records").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteHealthRecord", error);
 }
 
@@ -538,8 +533,8 @@ export async function deleteHealthRecordRow(client: KoreServerDbClient, familyId
 
 export type ExpenseInsert = Database["public"]["Tables"]["expenses"]["Insert"];
 
-export async function getExpenses(familyId: string): Promise<Expense[]> {
-  const { data, error } = await db()
+export async function getExpenses(client: KoreServerDbClient, familyId: string): Promise<Expense[]> {
+  const { data, error } = await client
     .from("expenses")
     .select("*")
     .eq("family_id", familyId)
@@ -548,8 +543,8 @@ export async function getExpenses(familyId: string): Promise<Expense[]> {
   return data ?? [];
 }
 
-export async function addExpense(familyId: string, data: ExpenseInsert): Promise<Expense> {
-  const { data: created, error } = await db()
+export async function addExpense(client: KoreServerDbClient, familyId: string, data: ExpenseInsert): Promise<Expense> {
+  const { data: created, error } = await client
     .from("expenses")
     .insert({ ...data, family_id: familyId })
     .select("*")
@@ -558,15 +553,15 @@ export async function addExpense(familyId: string, data: ExpenseInsert): Promise
   return created as Expense;
 }
 
-export async function deleteExpense(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("expenses").delete().eq("family_id", familyId).eq("id", id);
+export async function deleteExpense(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("expenses").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteExpense", error);
 }
 
 export type KoreNoteInsert = Database["public"]["Tables"]["kore_notes"]["Insert"];
 
-export async function getKoreNotes(familyId: string, recipientId?: string): Promise<KoreNote[]> {
-  let query = db()
+export async function getKoreNotes(client: KoreServerDbClient, familyId: string, recipientId?: string): Promise<KoreNote[]> {
+  let query = client
     .from("kore_notes")
     .select("*")
     .eq("family_id", familyId)
@@ -577,8 +572,8 @@ export async function getKoreNotes(familyId: string, recipientId?: string): Prom
   return data ?? [];
 }
 
-export async function addKoreNote(familyId: string, data: KoreNoteInsert): Promise<KoreNote> {
-  const { data: created, error } = await db()
+export async function addKoreNote(client: KoreServerDbClient, familyId: string, data: KoreNoteInsert): Promise<KoreNote> {
+  const { data: created, error } = await client
     .from("kore_notes")
     .insert({ ...data, family_id: familyId })
     .select("*")
@@ -587,8 +582,8 @@ export async function addKoreNote(familyId: string, data: KoreNoteInsert): Promi
   return created as KoreNote;
 }
 
-export async function markNoteAsRead(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("kore_notes").update({ status: "read" }).eq("family_id", familyId).eq("id", id);
+export async function markNoteAsRead(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("kore_notes").update({ status: "read" }).eq("family_id", familyId).eq("id", id);
   throwDb("markNoteAsRead", error);
 }
 
@@ -724,8 +719,8 @@ export async function removeFamilyCorchoPhotos(client: KoreServerDbClient, famil
   await removeCorchoPhotoObjects(client, paths);
 }
 
-export async function getDomains(familyId: string): Promise<Domain[]> {
-  const { data, error } = await db()
+export async function getDomains(client: KoreServerDbClient, familyId: string): Promise<Domain[]> {
+  const { data, error } = await client
     .from("domains")
     .select("*")
     .eq("family_id", familyId)
@@ -734,22 +729,23 @@ export async function getDomains(familyId: string): Promise<Domain[]> {
   return data ?? [];
 }
 
-export async function updateDomain(familyId: string, id: string, data: Partial<Domain>): Promise<void> {
-  const { error } = await db().from("domains").update(data).eq("family_id", familyId).eq("id", id);
+export async function updateDomain(client: KoreServerDbClient, familyId: string, id: string, data: Partial<Domain>): Promise<void> {
+  const { error } = await client.from("domains").update(data).eq("family_id", familyId).eq("id", id);
   throwDb("updateDomain", error);
 }
 
-export async function activateDomain(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("domains").update({ is_active: true }).eq("family_id", familyId).eq("id", id);
+export async function activateDomain(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("domains").update({ is_active: true }).eq("family_id", familyId).eq("id", id);
   throwDb("activateDomain", error);
 }
 
-export async function deactivateDomain(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("domains").update({ is_active: false }).eq("family_id", familyId).eq("id", id);
+export async function deactivateDomain(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("domains").update({ is_active: false }).eq("family_id", familyId).eq("id", id);
   throwDb("deactivateDomain", error);
 }
 
 export async function createCustomDomain(
+  client: KoreServerDbClient,
   familyId: string,
   data: { name: string; emoji: string; owner_id?: string | null; weight?: number; priority_level?: number | null },
 ): Promise<Domain> {
@@ -766,18 +762,19 @@ export async function createCustomDomain(
     priority_level: data.priority_level ?? null,
     agent: null,
   };
-  const { data: created, error } = await db().from("domains").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("domains").insert(payload).select("*").single();
   throwDb("createCustomDomain", error);
   return created as Domain;
 }
 
 export async function addDomainHistory(
+  client: KoreServerDbClient,
   familyId: string,
   domainId: string,
   text: string,
   createdBy: string,
 ): Promise<void> {
-  const { error } = await db().from("domain_history").insert({
+  const { error } = await client.from("domain_history").insert({
     family_id: familyId,
     domain_id: domainId,
     text,
@@ -786,21 +783,21 @@ export async function addDomainHistory(
   throwDb("addDomainHistory", error);
 }
 
-export async function getDomainHistory(familyId: string, domainId: string): Promise<DomainHistoryRow[]> {
-  const { data, error } = await db()
+export async function getDomainHistory(client: KoreServerDbClient, familyId: string, domainId: string): Promise<DomainHistoryRow[]> {
+  const { data, error } = await client
     .from("domain_history")
     .select("*")
     .eq("family_id", familyId)
     .eq("domain_id", domainId)
     .order("created_at", { ascending: false });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as DomainHistoryRow[];
 }
 
 export type DailyMetricsUpsert = Database["public"]["Tables"]["daily_metrics"]["Insert"];
 
-export async function getDailyMetrics(familyId: string, date: string): Promise<DailyMetrics | null> {
-  const { data, error } = await db()
+export async function getDailyMetrics(client: KoreServerDbClient, familyId: string, date: string): Promise<DailyMetrics | null> {
+  const { data, error } = await client
     .from("daily_metrics")
     .select("*")
     .eq("family_id", familyId)
@@ -810,15 +807,15 @@ export async function getDailyMetrics(familyId: string, date: string): Promise<D
   return data;
 }
 
-export async function upsertDailyMetrics(familyId: string, data: DailyMetricsUpsert): Promise<void> {
-  const { error } = await db()
+export async function upsertDailyMetrics(client: KoreServerDbClient, familyId: string, data: DailyMetricsUpsert): Promise<void> {
+  const { error } = await client
     .from("daily_metrics")
     .upsert({ ...data, family_id: familyId }, { onConflict: "date" });
   throwDb("upsertDailyMetrics", error);
 }
 
-export async function getAgentMemory(familyId: string, category?: string): Promise<AgentMemoryRow[]> {
-  let query = db()
+export async function getAgentMemory(client: KoreServerDbClient, familyId: string, category?: string): Promise<AgentMemoryRow[]> {
+  let query = client
     .from("agent_memory")
     .select("*")
     .eq("family_id", familyId)
@@ -827,17 +824,18 @@ export async function getAgentMemory(familyId: string, category?: string): Promi
   if (category) query = query.eq("category", category);
   const { data, error } = await query;
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as AgentMemoryRow[];
 }
 
 export async function upsertAgentMemory(
+  client: KoreServerDbClient,
   familyId: string,
   key: string,
   value: string,
   category: string,
 ): Promise<void> {
   const now = new Date().toISOString();
-  const { data: existing, error: selErr } = await db()
+  const { data: existing, error: selErr } = await client
     .from("agent_memory")
     .select("id")
     .eq("family_id", familyId)
@@ -845,14 +843,14 @@ export async function upsertAgentMemory(
     .maybeSingle();
   throwDb("upsertAgentMemory(select)", selErr);
   if (existing?.id) {
-    const { error } = await db()
+    const { error } = await client
       .from("agent_memory")
       .update({ value, category, updated_at: now })
       .eq("id", existing.id);
     throwDb("upsertAgentMemory(update)", error);
     return;
   }
-  const { error } = await db().from("agent_memory").insert({
+  const { error } = await client.from("agent_memory").insert({
     family_id: familyId,
     key,
     value,
@@ -863,17 +861,18 @@ export async function upsertAgentMemory(
   throwDb("upsertAgentMemory(insert)", error);
 }
 
-export async function getShoppingItems(familyId: string): Promise<ShoppingItemRow[]> {
-  const { data, error } = await db()
+export async function getShoppingItems(client: KoreServerDbClient, familyId: string): Promise<ShoppingItemRow[]> {
+  const { data, error } = await client
     .from("shopping_items")
     .select("*")
     .eq("family_id", familyId)
     .order("created_at", { ascending: false });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as ShoppingItemRow[];
 }
 
 export async function addShoppingItem(
+  client: KoreServerDbClient,
   familyId: string,
   data: {
     name: string;
@@ -893,7 +892,7 @@ export async function addShoppingItem(
     completed: false,
   };
   console.log("[kore-db] addShoppingItem payload", payload);
-  const { data: created, error } = await db().from("shopping_items").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("shopping_items").insert(payload).select("*").single();
   if (error) {
     const message = String(error.message ?? "");
     const details = String((error as { details?: string }).details ?? "");
@@ -920,23 +919,23 @@ export async function addShoppingItem(
   return created as ShoppingItemRow;
 }
 
-export async function completeShoppingItem(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("shopping_items").update({ completed: true }).eq("family_id", familyId).eq("id", id);
+export async function completeShoppingItem(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("shopping_items").update({ completed: true }).eq("family_id", familyId).eq("id", id);
   throwDb("completeShoppingItem", error);
 }
 
-export async function reactivateShoppingItem(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("shopping_items").update({ completed: false }).eq("family_id", familyId).eq("id", id);
+export async function reactivateShoppingItem(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("shopping_items").update({ completed: false }).eq("family_id", familyId).eq("id", id);
   throwDb("reactivateShoppingItem", error);
 }
 
-export async function deleteShoppingItem(familyId: string, id: string): Promise<void> {
-  const { error } = await db().from("shopping_items").delete().eq("family_id", familyId).eq("id", id);
+export async function deleteShoppingItem(client: KoreServerDbClient, familyId: string, id: string): Promise<void> {
+  const { error } = await client.from("shopping_items").delete().eq("family_id", familyId).eq("id", id);
   throwDb("deleteShoppingItem", error);
 }
 
-export async function clearCompletedItems(familyId: string): Promise<void> {
-  const { error } = await db().from("shopping_items").delete().eq("family_id", familyId).eq("completed", true);
+export async function clearCompletedItems(client: KoreServerDbClient, familyId: string): Promise<void> {
+  const { error } = await client.from("shopping_items").delete().eq("family_id", familyId).eq("completed", true);
   throwDb("clearCompletedItems", error);
 }
 
@@ -1140,9 +1139,9 @@ function currentWeekStartIso(now = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export async function getWeeklyMenu(familyId: string, week_start?: string): Promise<MenuItemRow[]> {
+export async function getWeeklyMenu(client: KoreServerDbClient, familyId: string, week_start?: string): Promise<MenuItemRow[]> {
   const targetWeek = (week_start ?? currentWeekStartIso()).slice(0, 10);
-  const { data, error } = await db()
+  const { data, error } = await client
     .from("menu_items")
     .select("*")
     .eq("family_id", familyId)
@@ -1150,10 +1149,11 @@ export async function getWeeklyMenu(familyId: string, week_start?: string): Prom
     .order("day", { ascending: true })
     .order("meal", { ascending: true });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as MenuItemRow[];
 }
 
 export async function addMenuItem(
+  client: KoreServerDbClient,
   familyId: string,
   data: {
     day: string;
@@ -1169,14 +1169,14 @@ export async function addMenuItem(
     dish: data.dish,
     week_start: (data.week_start ?? currentWeekStartIso()).slice(0, 10),
   };
-  const { data: created, error } = await db().from("menu_items").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("menu_items").insert(payload).select("*").single();
   throwDb("addMenuItem", error);
   return created as MenuItemRow;
 }
 
-export async function clearDayMenu(familyId: string, day: string, week_start?: string): Promise<void> {
+export async function clearDayMenu(client: KoreServerDbClient, familyId: string, day: string, week_start?: string): Promise<void> {
   const targetWeek = (week_start ?? currentWeekStartIso()).slice(0, 10);
-  const { error } = await db().from("menu_items").delete().eq("family_id", familyId).eq("day", day).eq("week_start", targetWeek);
+  const { error } = await client.from("menu_items").delete().eq("family_id", familyId).eq("day", day).eq("week_start", targetWeek);
   throwDb("clearDayMenu", error);
 }
 
@@ -1288,8 +1288,8 @@ export async function deleteSchoolItem(
   throwDb("deleteSchoolItem", error);
 }
 
-export async function getLeisureActivities(familyId: string, person?: string): Promise<LeisureActivityRow[]> {
-  let query = db()
+export async function getLeisureActivities(client: KoreServerDbClient, familyId: string, person?: string): Promise<LeisureActivityRow[]> {
+  let query = client
     .from("leisure_activities")
     .select("*")
     .eq("family_id", familyId)
@@ -1297,10 +1297,11 @@ export async function getLeisureActivities(familyId: string, person?: string): P
   if (person) query = query.eq("person", person);
   const { data, error } = await query;
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as LeisureActivityRow[];
 }
 
 export async function addLeisureActivity(
+  client: KoreServerDbClient,
   familyId: string,
   data: {
     person: string;
@@ -1316,12 +1317,13 @@ export async function addLeisureActivity(
     date: data.date ? data.date.slice(0, 10) : null,
     duration_minutes: data.duration_minutes ?? null,
   };
-  const { data: created, error } = await db().from("leisure_activities").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("leisure_activities").insert(payload).select("*").single();
   throwDb("addLeisureActivity", error);
   return created as LeisureActivityRow;
 }
 
 export async function logPersonalTime(
+  client: KoreServerDbClient,
   familyId: string,
   person: string,
   description: string,
@@ -1334,7 +1336,7 @@ export async function logPersonalTime(
     date: null,
     duration_minutes: minutes,
   };
-  const { data: created, error } = await db().from("leisure_activities").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("leisure_activities").insert(payload).select("*").single();
   throwDb("logPersonalTime", error);
   return created as LeisureActivityRow;
 }
@@ -1443,7 +1445,7 @@ export async function getSleepSummaryFromSessions(
   return { days, sessions, by_person: summary };
 }
 
-export async function logWakeup(familyId: string, data: { person: string; reason?: string }): Promise<SleepLogRow> {
+export async function logWakeup(client: KoreServerDbClient, familyId: string, data: { person: string; reason?: string }): Promise<SleepLogRow> {
   const payload = {
     family_id: familyId,
     person: data.person,
@@ -1452,7 +1454,7 @@ export async function logWakeup(familyId: string, data: { person: string; reason
     hours: null,
   };
   console.log("[kore-db] logWakeup payload", payload);
-  const { data: created, error } = await db().from("sleep_logs").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("sleep_logs").insert(payload).select("*").single();
   if (error) {
     console.error("[kore-db] logWakeup error", {
       message: error.message,
@@ -1467,7 +1469,7 @@ export async function logWakeup(familyId: string, data: { person: string; reason
   return created as SleepLogRow;
 }
 
-export async function logSleepHours(familyId: string, person: string, hours: number): Promise<SleepLogRow> {
+export async function logSleepHours(client: KoreServerDbClient, familyId: string, person: string, hours: number): Promise<SleepLogRow> {
   const payload = {
     family_id: familyId,
     person,
@@ -1475,29 +1477,46 @@ export async function logSleepHours(familyId: string, person: string, hours: num
     reason: null,
     hours,
   };
-  const { data: created, error } = await db().from("sleep_logs").insert(payload).select("*").single();
+  const { data: created, error } = await client.from("sleep_logs").insert(payload).select("*").single();
   throwDb("logSleepHours", error);
   return created as SleepLogRow;
 }
 
-export async function getSleepLogs(familyId: string, days = 7): Promise<SleepLogRow[]> {
+export async function getSleepLogs(client: KoreServerDbClient, familyId: string, days = 7): Promise<SleepLogRow[]> {
   const cutoff = new Date(Date.now() - Math.max(1, days) * 24 * 3600 * 1000).toISOString();
-  const { data, error } = await db()
+  const { data, error } = await client
     .from("sleep_logs")
     .select("*")
     .eq("family_id", familyId)
     .gte("logged_at", cutoff)
     .order("logged_at", { ascending: false });
   if (error) return [];
-  return data ?? [];
+  return (data ?? []) as SleepLogRow[];
+}
+
+export async function addEventLog(
+  client: KoreServerDbClient,
+  familyId: string,
+  userId: string,
+  data: { type: string; raw_input: string; domain_id?: string | null },
+): Promise<void> {
+  const { error } = await client.from("events_log").insert({
+    family_id: familyId,
+    user_id: userId,
+    type: data.type,
+    raw_input: data.raw_input,
+    domain_id: data.domain_id ?? null,
+  });
+  throwDb("addEventLog", error);
 }
 
 export async function getNightRecoveryScore(
+  client: KoreServerDbClient,
   familyId: string,
 ): Promise<{ date: string; night_recovery_score: number | null }> {
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const metric = await getDailyMetrics(familyId, date);
+  const metric = await getDailyMetrics(client, familyId, date);
   return { date, night_recovery_score: metric?.night_recovery_score ?? null };
 }
 
@@ -1534,9 +1553,10 @@ export async function saveSubscription(
 }
 
 export async function getSubscriptionsByFamily(
+  client: KoreServerDbClient,
   familyId: string,
 ): Promise<{ id: string; subscription: WebPushSubscriptionPayload }[]> {
-  const { data, error } = await db()
+  const { data, error } = await client
     .from("push_subscriptions")
     .select("id, subscription_data")
     .eq("family_id", familyId)

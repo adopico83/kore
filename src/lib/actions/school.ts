@@ -1,23 +1,16 @@
 "use server";
 
-import { getScopedFamilyId, getScopedUserId } from "@/lib/family-context";
+import { getScopedUserId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
 import {
   addSchoolEvent as dbAddSchoolEvent,
   deleteSchoolItem as dbDeleteSchoolItem,
   getSchoolEvents as dbGetSchoolEvents,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
-
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
 
 export async function getSchoolEvents() {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbGetSchoolEvents(admin, familyId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetSchoolEvents(client, familyId);
 }
 
 export async function addSchoolEvent(data: {
@@ -27,17 +20,15 @@ export async function addSchoolEvent(data: {
   type?: string;
   description?: string;
 }) {
-  const familyId = await requireFamilyId();
+  const { familyId, client } = await requireFamilyDb();
   const userId = await getScopedUserId();
-  const admin = createAdminClient();
-  return dbAddSchoolEvent(admin, familyId, {
+  return dbAddSchoolEvent(client, familyId, {
     ...data,
     created_by: userId,
   });
 }
 
 export async function deleteSchoolEvent(id: string) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbDeleteSchoolItem(admin, familyId, id, "event");
+  const { familyId, client } = await requireFamilyDb();
+  return dbDeleteSchoolItem(client, familyId, id, "event");
 }

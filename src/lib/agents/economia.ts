@@ -116,12 +116,12 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         is_shared,
         source: "manual",
       };
-      const row = await addExpense(familyId, insert);
+      const row = await addExpense(ctx.db, familyId, insert);
       return { ok: true, expense: row };
     }
     case "get_monthly_summary": {
       const { start, end } = monthWindow();
-      const rows = await getExpenses(familyId);
+      const rows = await getExpenses(ctx.db, familyId);
       const inMonth = rows.filter((r) => {
         const t = new Date(r.created_at ?? "").getTime();
         return t >= start.getTime() && t <= end.getTime();
@@ -136,11 +136,11 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     }
     case "get_expenses_list": {
       const limit = Math.min(100, Math.max(1, Number(a.limit) || 30));
-      const rows = await getExpenses(familyId);
+      const rows = await getExpenses(ctx.db, familyId);
       return { ok: true, expenses: rows.slice(0, limit) };
     }
     case "get_balance": {
-      const rows = await getExpenses(familyId);
+      const rows = await getExpenses(ctx.db, familyId);
       const shared = rows.filter((r) => r.is_shared);
       const totalShared = shared.reduce((acc, r) => acc + Math.abs(r.amount), 0);
       const adults = sortedAdultsOwnerFirst(profiles);
@@ -165,7 +165,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     case "delete_expense": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await deleteExpense(familyId, id);
+      await deleteExpense(ctx.db, familyId, id);
       return { ok: true, deleted: id };
     }
     default:

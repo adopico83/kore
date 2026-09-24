@@ -5,7 +5,8 @@ import {
   CORCHO_MAX_PHOTOS,
   isJpegBytes,
 } from "@/lib/corcho-photos";
-import { getScopedFamilyId, getScopedUserId } from "@/lib/family-context";
+import { getScopedUserId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
 import {
   addKoreNote as dbAddKoreNote,
   deleteKoreNote as dbDeleteKoreNote,
@@ -18,13 +19,6 @@ import {
   type KoreNote,
   type KoreNoteInsert,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
-
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
 
 export type CorchoNote = KoreNote & { imageUrls: string[] };
 
@@ -37,12 +31,11 @@ function corchoStorageError(error: unknown): Error {
 }
 
 export async function getKoreNotes(recipientId?: string): Promise<CorchoNote[]> {
-  const familyId = await requireFamilyId();
-  const notes = await dbGetKoreNotes(familyId, recipientId);
+  const { familyId, client } = await requireFamilyDb();
+  const notes = await dbGetKoreNotes(client, familyId, recipientId);
   if (notes.length === 0) return [];
-  const admin = createAdminClient();
   const imageUrls = await getCorchoPhotoUrlsByNote(
-    admin,
+    client,
     familyId,
     notes.map((note) => note.id),
   );
@@ -50,13 +43,13 @@ export async function getKoreNotes(recipientId?: string): Promise<CorchoNote[]> 
 }
 
 export async function addKoreNote(data: KoreNoteInsert) {
-  const familyId = await requireFamilyId();
-  return dbAddKoreNote(familyId, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbAddKoreNote(client, familyId, data);
 }
 
 export async function markNoteAsRead(id: string) {
-  const familyId = await requireFamilyId();
-  return dbMarkNoteAsRead(familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbMarkNoteAsRead(client, familyId, id);
 }
 
 function photoFiles(formData: FormData): File[] {
@@ -66,7 +59,7 @@ function photoFiles(formData: FormData): File[] {
 }
 
 export async function addCorchoNote(formData: FormData): Promise<void> {
-  const familyId = await requireFamilyId();
+  const { familyId, client } = await requireFamilyDb();
   const userId = await getScopedUserId();
   if (!userId) throw new Error("No hay sesión de usuario para enviar el mensaje.");
 
@@ -99,15 +92,14 @@ export async function addCorchoNote(formData: FormData): Promise<void> {
     files.push(bytes);
   }
 
-  const admin = createAdminClient();
-  const profiles = await getProfilesForFamily(admin, familyId);
+  const profiles = await getProfilesForFamily(client, familyId);
   const senderOk = profiles.some((profile) => profile.id === userId);
   const recipientOk = profiles.some((profile) => profile.id === recipientId);
   if (!senderOk || !recipientOk || userId === recipientId) {
     throw new Error("El destinatario no pertenece a tu hogar.");
   }
 
-  const note = await insertKoreNote(admin, familyId, {
+  const note = await insertKoreNote(client, familyId, {
     sender_id: userId,
     recipient_id: recipientId,
     content: content || null,
@@ -119,10 +111,10 @@ export async function addCorchoNote(formData: FormData): Promise<void> {
   if (files.length === 0) return;
 
   try {
-    await saveCorchoNotePhotos(admin, familyId, note.id, files);
+    await saveCorchoNotePhotos(client, familyId, note.id, files);
   } catch (error) {
     try {
-      await dbDeleteKoreNote(admin, familyId, note.id);
+      await dbDeleteKoreNote(client, familyId, note.id);
     } catch {
       /* La nota se queda si no se puede deshacer; el error útil es el de la foto. */
     }
@@ -133,10 +125,9 @@ export async function addCorchoNote(formData: FormData): Promise<void> {
 export async function deleteCorchoNote(noteId: string): Promise<void> {
   const id = noteId.trim();
   if (!id) throw new Error("Falta el recado.");
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
+  const { familyId, client } = await requireFamilyDb();
   try {
-    await dbDeleteKoreNote(admin, familyId, id);
+    await dbDeleteKoreNote(client, familyId, id);
   } catch (error) {
     throw corchoStorageError(error);
   }

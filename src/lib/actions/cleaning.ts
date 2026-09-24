@@ -1,6 +1,6 @@
 "use server";
 
-import { getScopedFamilyId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
 import {
   addCleaningTask as dbAddCleaningTask,
   completeCleaningTask as dbCompleteCleaningTask,
@@ -8,18 +8,10 @@ import {
   getPendingCleaningTasks as dbGetPendingCleaningTasks,
   getUpcomingCleaningTasks as dbGetUpcomingCleaningTasks,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
-
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
 
 export async function getCleaningTasks() {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbGetCleaningTasks(admin, familyId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetCleaningTasks(client, familyId);
 }
 
 export async function addCleaningTask(data: {
@@ -28,25 +20,21 @@ export async function addCleaningTask(data: {
   frequency?: string;
   assigned_to?: string;
 }) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbAddCleaningTask(admin, familyId, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbAddCleaningTask(client, familyId, data);
 }
 
 export async function completeCleaningTask(id: string) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbCompleteCleaningTask(admin, familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbCompleteCleaningTask(client, familyId, id);
 }
 
 export async function getPendingCleaningTasks() {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbGetPendingCleaningTasks(admin, familyId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetPendingCleaningTasks(client, familyId);
 }
 
 export async function getUpcomingCleaningTasks(withinDays = 7) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbGetUpcomingCleaningTasks(admin, familyId, withinDays);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetUpcomingCleaningTasks(client, familyId, withinDays);
 }
