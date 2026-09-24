@@ -6,6 +6,8 @@ import {
   buildTodayAgenda,
   formatHomeDate,
   greetingFor,
+  corchoMessageText,
+  corchoNotePreview,
   honestCorchoText,
 } from "@/components/home/home-model";
 
@@ -65,5 +67,14 @@ describe("home inicio", () => {
     expect(honestCorchoText("📎 Imagen")).toBe("Había una foto adjunta; no se guardó.");
     expect(honestCorchoText("📎 2 imágenes")).toBe("Había una foto adjunta; no se guardó.");
     expect(honestCorchoText("Trae el queso")).toBe("Trae el queso");
+  });
+
+  it("muestra la foto cuando el corcho sí la ha guardado", () => {
+    expect(corchoMessageText("📎 Imagen", 1)).toBe("");
+    expect(corchoMessageText("Trae el queso", 2)).toBe("Trae el queso");
+    expect(corchoNotePreview("", 1)).toBe("Foto");
+    expect(corchoNotePreview(null, 3)).toBe("3 fotos");
+    expect(corchoNotePreview("📎 2 imágenes", 0)).toBe("Había una foto adjunta; no se guardó.");
+    expect(corchoNotePreview("", 0)).toBe("(nota sin texto)");
   });
 });

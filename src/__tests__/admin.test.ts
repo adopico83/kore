@@ -93,6 +93,13 @@ describe("kore-db admin", () => {
           }),
         };
       }
+      if (table === "kore_note_images") {
+        return {
+          select: () => ({
+            eq: async () => ({ data: [], error: null }),
+          }),
+        };
+      }
       if (table === "profiles") {
         return {
           delete: () => ({

@@ -2,6 +2,8 @@
 
 import { Play, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { CorchoPhotoGrid, CorchoPhotoLightbox } from "@/components/CorchoChat/CorchoPhotos";
+import { corchoMessageText } from "@/components/home/home-model";
 import { getKoreNotes } from "@/lib/actions/corcho";
 import type { Profile } from "@/lib/kore-db";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
@@ -13,6 +15,7 @@ type FeedMessage = {
   avatarBorder: string;
   at: string;
   text: string;
+  imageUrls: string[];
   audioUrl?: string;
 };
 
@@ -32,9 +35,16 @@ export type CorchoHistorialProps = {
 };
 
 export function CorchoHistorial({ onClose, currentUserId, profiles }: CorchoHistorialProps) {
-  useEscapeKey(onClose);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [feed, setFeed] = useState<FeedMessage[]>([]);
+  const [fotoAbierta, setFotoAbierta] = useState<string | null>(null);
+  useEscapeKey(() => {
+    if (fotoAbierta) {
+      setFotoAbierta(null);
+      return;
+    }
+    onClose();
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +63,8 @@ export function CorchoHistorial({ onClose, currentUserId, profiles }: CorchoHist
             initial,
             avatarBorder: isMe ? "#10b981" : "#f59e0b",
             at: row.created_at ?? "",
-            text: String(row.content ?? ""),
+            text: corchoMessageText(row.content, row.imageUrls.length),
+            imageUrls: row.imageUrls,
           };
         });
         setFeed(mapped);
@@ -164,6 +175,11 @@ export function CorchoHistorial({ onClose, currentUserId, profiles }: CorchoHist
                   </p>
                 </div>
 
+                {msg.imageUrls.length > 0 ? (
+                  <div style={{ marginBottom: msg.text || hasAudio ? 8 : 0 }}>
+                    <CorchoPhotoGrid urls={msg.imageUrls} onOpen={setFotoAbierta} />
+                  </div>
+                ) : null}
                 {hasAudio ? (
                   <div
                     style={{
@@ -214,16 +230,17 @@ export function CorchoHistorial({ onClose, currentUserId, profiles }: CorchoHist
                       <audio controls autoPlay src={msg.audioUrl} style={{ width: "100%" }} />
                     ) : null}
                   </div>
-                ) : (
+                ) : msg.text ? (
                   <p style={{ margin: 0, fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", color: "#e4e6ed" }}>
                     {msg.text}
                   </p>
-                )}
+                ) : null}
               </article>
             );
           })
         )}
       </main>
+      {fotoAbierta ? <CorchoPhotoLightbox url={fotoAbierta} onClose={() => setFotoAbierta(null)} /> : null}
     </div>
   );
 }

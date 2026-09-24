@@ -1,7 +1,7 @@
 "use client";
 
-import { History, Loader2, Trash2, X } from "lucide-react";
-import type { CSSProperties } from "react";
+import { History, ImagePlus, Loader2, Trash2, X } from "lucide-react";
+import type { ChangeEvent, CSSProperties } from "react";
 import {
   useCallback,
   useEffect,
@@ -11,10 +11,13 @@ import {
   type PointerEvent,
   type TouchEvent,
 } from "react";
-import { honestCorchoText } from "@/components/home/home-model";
+import { corchoMessageText } from "@/components/home/home-model";
+import { CorchoPhotoGrid, CorchoPhotoLightbox } from "@/components/CorchoChat/CorchoPhotos";
 import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
-import { addKoreNote, getKoreNotes } from "@/lib/actions/corcho";
+import { CORCHO_MAX_PHOTOS } from "@/lib/corcho-photos";
+import { compressImageToJpegBlob } from "@/lib/compress-image";
+import { addCorchoNote, deleteCorchoNote, getKoreNotes } from "@/lib/actions/corcho";
 
 const GREEN = "#4CC9A0";
 const PURPLE = "#9B8FE8";
@@ -31,6 +34,25 @@ type CorchoMessage = {
   role: CorchoRole;
   content: string;
   at: string;
+  imageUrls: string[];
+};
+
+type FotoPendiente = {
+  id: string;
+  url: string;
+  blob: Blob;
+};
+
+const fileInputHidden: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0,0,0,0)",
+  whiteSpace: "nowrap",
+  border: 0,
 };
 
 type CorchoConv = {
@@ -116,7 +138,6 @@ export function CorchoChat({
   recipientName = "tu pareja",
   embedded = false,
 }: CorchoChatProps) {
-  useEscapeKey(onClose);
   const [mensaje, setMensaje] = useState("");
   const [conversationId, setConversationId] = useState("");
   const [conversaciones, setConversaciones] = useState<CorchoConv[]>([]);
@@ -125,8 +146,12 @@ export function CorchoChat({
   const [error, setError] = useState("");
   const [grabando, setGrabando] = useState(false);
   const [transcribiendo, setTranscribiendo] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [fotosPendientes, setFotosPendientes] = useState<FotoPendiente[]>([]);
+  const [fotoAbierta, setFotoAbierta] = useState<string | null>(null);
 
   const listRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
@@ -135,17 +160,34 @@ export function CorchoChat({
 
   const canSendCorcho = Boolean(currentUserId.trim() && partnerUserId.trim());
 
+  const closeTop = useCallback(() => {
+    if (fotoAbierta) {
+      setFotoAbierta(null);
+      return;
+    }
+    onClose();
+  }, [fotoAbierta, onClose]);
+  useEscapeKey(closeTop);
+
   const loadMessages = useCallback(async () => {
-    const rows = await getKoreNotes();
+    let rows: Awaited<ReturnType<typeof getKoreNotes>>;
+    try {
+      rows = await getKoreNotes();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "No se pudieron cargar los recados.");
+      return;
+    }
     const latest = rows.slice(0, 50);
     const mapped: CorchoMessage[] = [...latest].reverse().map((row) => ({
       id: row.id,
       role: row.sender_id === currentUserId ? "me" : "partner",
-      content: honestCorchoText(String(row.content ?? "").trim()),
+      content: corchoMessageText(row.content, row.imageUrls.length),
       at: row.created_at ?? "",
+      imageUrls: row.imageUrls,
     }));
     setHistorial(mapped);
-    const first = mapped[0]?.content?.trim() ?? "";
+    const firstRaw = mapped[0]?.content?.trim() ?? "";
+    const first = firstRaw || (mapped[0] && mapped[0].imageUrls.length > 0 ? "Foto" : "");
     const firstPhrase = first.length > 60 ? `${first.slice(0, 60)}…` : first || "Nueva conversación";
     setConversaciones([
       {
@@ -192,11 +234,24 @@ export function CorchoChat({
     setPanelHistorial(false);
   };
 
+  const soltarFotos = (fotos: FotoPendiente[]) => {
+    for (const foto of fotos) URL.revokeObjectURL(foto.url);
+  };
+
+  const quitarFoto = (id: string) => {
+    setFotosPendientes((prev) => {
+      const found = prev.find((foto) => foto.id === id);
+      if (found) URL.revokeObjectURL(found.url);
+      return prev.filter((foto) => foto.id !== id);
+    });
+  };
+
   const handleEnviarTexto = async (texto: string, fromTranscription?: boolean) => {
     const clean = texto.trim();
-    if (!clean) {
+    const fotos = fotosPendientes;
+    if (!clean && fotos.length === 0) {
       if (fromTranscription) setTranscribiendo(false);
-      setError("Escribe un mensaje. Las fotos no se guardan en el corcho.");
+      setError("Escribe un recado o adjunta una foto.");
       return;
     }
     const uid = currentUserId.trim();
@@ -211,23 +266,78 @@ export function CorchoChat({
       return;
     }
 
-    await addKoreNote({
-      content: clean,
-      sender_id: uid,
-      recipient_id: pid,
-      audio_url: null,
-      status: "unread",
-      priority: "low",
-    });
-    await loadMessages();
-    emitKoreUpdate(["kore_notes"]);
-    setMensaje("");
+    setEnviando(true);
     setError("");
-    if (fromTranscription) setTranscribiendo(false);
+    try {
+      const formData = new FormData();
+      formData.set("content", clean);
+      formData.set("recipient_id", pid);
+      fotos.forEach((foto, index) => {
+        formData.append("photos", new File([foto.blob], `foto-${index + 1}.jpg`, { type: "image/jpeg" }));
+      });
+      await addCorchoNote(formData);
+      soltarFotos(fotos);
+      setFotosPendientes([]);
+      setMensaje("");
+      await loadMessages();
+      emitKoreUpdate(["kore_notes"]);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "No se pudo enviar el recado.");
+    } finally {
+      setEnviando(false);
+      if (fromTranscription) setTranscribiendo(false);
+    }
   };
 
   const handleEnviar = () => {
+    if (enviando || transcribiendo || grabando) return;
     void handleEnviarTexto(mensaje);
+  };
+
+  const handleFotos = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    setError("");
+    const nuevas: FotoPendiente[] = [];
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        setError("Solo se pueden adjuntar fotos.");
+        soltarFotos(nuevas);
+        return;
+      }
+      try {
+        const blob = await compressImageToJpegBlob(file);
+        nuevas.push({ id: crypto.randomUUID(), url: URL.createObjectURL(blob), blob });
+      } catch {
+        setError("No se pudo procesar una foto.");
+        soltarFotos(nuevas);
+        return;
+      }
+    }
+    const room = CORCHO_MAX_PHOTOS - fotosPendientes.length;
+    const accepted = nuevas.slice(0, Math.max(room, 0));
+    soltarFotos(nuevas.slice(accepted.length));
+    if (accepted.length < nuevas.length) {
+      setError(`Puedes adjuntar hasta ${CORCHO_MAX_PHOTOS} fotos.`);
+    }
+    if (accepted.length > 0) {
+      setFotosPendientes((prev) => [...prev, ...accepted].slice(0, CORCHO_MAX_PHOTOS));
+    }
+  };
+
+  const eliminarRecado = (id: string) => {
+    if (!window.confirm("¿Eliminar este recado? También se borrarán sus fotos.")) return;
+    void (async () => {
+      try {
+        await deleteCorchoNote(id);
+        await loadMessages();
+        emitKoreUpdate(["kore_notes"]);
+        setError("");
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "No se pudo eliminar el recado.");
+      }
+    })();
   };
 
   const attachRecorderToStream = (stream: MediaStream) => {
@@ -375,8 +485,8 @@ export function CorchoChat({
         </div>
         <button
           type="button"
-          onClick={onClose}
-          {...touchEnd(onClose)}
+          onClick={closeTop}
+          {...touchEnd(closeTop)}
           aria-label="Cerrar"
           style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", padding: 8, background: "transparent", color: "rgba(255,255,255,0.85)", cursor: "pointer" }}
         >
@@ -419,13 +529,36 @@ export function CorchoChat({
                         background: isMe ? GREEN : "#1c2028",
                         color: isMe ? "#0a1a14" : TEXT,
                         border: isMe ? "none" : `1px solid ${PURPLE}55`,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
                       }}
                     >
-                      <p style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 14 }}>{msg.content}</p>
+                      <CorchoPhotoGrid urls={msg.imageUrls} onOpen={setFotoAbierta} />
+                      {msg.content ? (
+                        <p style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 14 }}>{msg.content}</p>
+                      ) : null}
                     </div>
-                    <p style={{ margin: "4px 0 0", textAlign: isMe ? "right" : "left", fontSize: 10, color: "rgba(255,255,255,0.45)" }}>
-                      {formatHHMM(msg.at)}
-                    </p>
+                    <div style={{ marginTop: 4, display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", alignItems: "center", gap: 8 }}>
+                      <p style={{ margin: 0, fontSize: 10, color: "rgba(255,255,255,0.45)" }}>
+                        {formatHHMM(msg.at)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => eliminarRecado(msg.id)}
+                        aria-label="Eliminar recado"
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: "rgba(255,255,255,0.45)",
+                          cursor: "pointer",
+                          padding: 0,
+                          lineHeight: 0,
+                        }}
+                      >
+                        <Trash2 width={12} height={12} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -448,9 +581,48 @@ export function CorchoChat({
             {error}
           </div>
         ) : null}
-        <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
-          Las fotos no se guardan. Escribe el recado en texto.
-        </p>
+        {fotosPendientes.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {fotosPendientes.map((foto) => (
+              <div key={foto.id} style={{ position: "relative", flexShrink: 0 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={foto.url}
+                  alt=""
+                  style={{ width: 64, height: 64, borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", objectFit: "cover" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => quitarFoto(foto.id)}
+                  aria-label="Quitar foto"
+                  style={{
+                    position: "absolute",
+                    top: -4,
+                    right: -4,
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "rgba(0,0,0,0.7)",
+                    padding: 4,
+                    color: "#fff",
+                    cursor: "pointer",
+                    lineHeight: 0,
+                  }}
+                >
+                  <X width={12} height={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(event) => void handleFotos(event)}
+          tabIndex={-1}
+          style={fileInputHidden}
+        />
         <textarea
           value={mensaje}
           onChange={(e) => setMensaje(e.target.value)}
@@ -467,18 +639,39 @@ export function CorchoChat({
         <div style={{ display: "flex", minHeight: 44, alignItems: "stretch", gap: 8 }}>
           <button
             type="button"
+            aria-label="Adjuntar foto"
+            disabled={transcribiendo || grabando || enviando || !canSendCorcho}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              display: "flex",
+              width: 44,
+              flexShrink: 0,
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.1)",
+              background: "rgba(255,255,255,0.1)",
+              color: "#fff",
+              cursor: transcribiendo || grabando || enviando || !canSendCorcho ? "not-allowed" : "pointer",
+              opacity: transcribiendo || grabando || enviando || !canSendCorcho ? 0.5 : 1,
+            }}
+          >
+            <ImagePlus width={20} height={20} />
+          </button>
+          <button
+            type="button"
             onClick={handleEnviar}
-            {...touchEnd(handleEnviar, transcribiendo || grabando || !canSendCorcho || mensaje.trim().length === 0)}
-            disabled={transcribiendo || grabando || !canSendCorcho || mensaje.trim().length === 0}
+            {...touchEnd(handleEnviar, transcribiendo || grabando || enviando || !canSendCorcho || (mensaje.trim().length === 0 && fotosPendientes.length === 0))}
+            disabled={transcribiendo || grabando || enviando || !canSendCorcho || (mensaje.trim().length === 0 && fotosPendientes.length === 0)}
             style={{ flex: 1, minWidth: 0, borderRadius: 8, border: "none", background: GREEN, color: "#0a1a14", fontSize: 15, fontWeight: 600, cursor: "pointer" }}
           >
-            Enviar
+            {enviando ? "Enviando…" : "Enviar"}
           </button>
           <button
             type="button"
             aria-label={grabando ? "Detener grabación" : "Grabar audio"}
-            onPointerDown={handleMicPointerDown(transcribiendo || !canSendCorcho)}
-            onClick={handleMicClick(transcribiendo || !canSendCorcho)}
+            onPointerDown={handleMicPointerDown(transcribiendo || enviando || !canSendCorcho)}
+            onClick={handleMicClick(transcribiendo || enviando || !canSendCorcho)}
             style={{
               display: "flex",
               width: 44,
@@ -495,6 +688,7 @@ export function CorchoChat({
           </button>
         </div>
       </footer>
+      {fotoAbierta ? <CorchoPhotoLightbox url={fotoAbierta} onClose={() => setFotoAbierta(null)} /> : null}
     </div>
   );
 }

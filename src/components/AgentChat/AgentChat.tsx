@@ -12,6 +12,7 @@ import {
   type TouchEvent,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import { compressImageToDataUrl } from "@/lib/compress-image";
 import { emitKoreUpdate, type KoreTable } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 import {
@@ -264,41 +265,6 @@ async function migrateLegacyAgentChatFromLocalStorage(currentUserId: string): Pr
     if (k?.startsWith("kore_orc_")) localStorage.removeItem(k);
   }
   localStorage.setItem(marker, "1");
-}
-
-async function comprimirImagenParaAgente(file: File): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result ?? ""));
-    r.onerror = () => reject(new Error("read"));
-    r.readAsDataURL(file);
-  });
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error("img"));
-    el.src = dataUrl;
-  });
-  const maxSide = 1600;
-  let w = img.naturalWidth;
-  let h = img.naturalHeight;
-  if (w <= 0 || h <= 0) throw new Error("dims");
-  if (w > maxSide || h > maxSide) {
-    if (w >= h) {
-      h = Math.round((h * maxSide) / w);
-      w = maxSide;
-    } else {
-      w = Math.round((w * maxSide) / h);
-      h = maxSide;
-    }
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("ctx");
-  ctx.drawImage(img, 0, 0, w, h);
-  return canvas.toDataURL("image/jpeg", 0.82);
 }
 
 const GREEN = "#4CC9A0";
@@ -1006,7 +972,7 @@ export function AgentChat({ onClose, currentUserId }: AgentChatProps) {
         return;
       }
       try {
-        nuevas.push(await comprimirImagenParaAgente(file));
+        nuevas.push(await compressImageToDataUrl(file));
       } catch {
         setError("No se pudo procesar una imagen.");
         return;
