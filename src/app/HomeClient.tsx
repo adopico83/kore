@@ -24,7 +24,7 @@ import {
   buildTodayAgenda,
   formatHomeDate,
   greetingFor,
-  honestCorchoText,
+  corchoNotePreview,
   type HomeTab,
   type PendingRow,
 } from "@/components/home/home-model";
@@ -195,7 +195,10 @@ function mapHealthRowsToDynamicSalud(rows: HealthRecord[]): DynamicSaludData {
   return out;
 }
 
-function mapKoreNotesToCorchoMessages(rows: KoreNote[], profiles: Profile[]): CorchoMessage[] {
+function mapKoreNotesToCorchoMessages(
+  rows: Array<KoreNote & { imageUrls?: string[] }>,
+  profiles: Profile[],
+): CorchoMessage[] {
   const safeRows = rows ?? [];
   const safeProfiles = profiles ?? [];
   return safeRows.slice(0, 3).map((r) => {
@@ -203,7 +206,7 @@ function mapKoreNotesToCorchoMessages(rows: KoreNote[], profiles: Profile[]): Co
     return {
       id: r.id,
       who: sender?.name ?? "Desconocido",
-      text: honestCorchoText(r.content ?? "(nota sin texto)"),
+      text: corchoNotePreview(r.content, r.imageUrls?.length ?? 0),
     };
   });
 }

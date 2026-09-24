@@ -574,6 +574,45 @@ export type Database = {
           },
         ]
       }
+      kore_note_images: {
+        Row: {
+          created_at: string
+          family_id: string
+          id: string
+          note_id: string
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          family_id: string
+          id?: string
+          note_id: string
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          family_id?: string
+          id?: string
+          note_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kore_note_images_family_id_fkey"
+            columns: ["family_id"]
+            isOneToOne: false
+            referencedRelation: "families"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kore_note_images_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "kore_notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       kore_notes: {
         Row: {
           audio_url: string | null

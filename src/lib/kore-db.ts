@@ -12,6 +12,13 @@ import {
   calendarEventIdFromDescription,
   descriptionWithCalendarEventId,
 } from "@/lib/kore-salud-sync";
+import {
+  CORCHO_PHOTOS_BUCKET,
+  CORCHO_PHOTO_URL_TTL_SECONDS,
+  corchoPhotoStoragePath,
+  isFamilyStoragePath,
+  isMissingCorchoPhotosTable,
+} from "@/lib/corcho-photos";
 import type { Database, Json } from "@/types/database";
 import { getBrowserClient } from "@/lib/supabase/client";
 
@@ -583,6 +590,138 @@ export async function addKoreNote(familyId: string, data: KoreNoteInsert): Promi
 export async function markNoteAsRead(familyId: string, id: string): Promise<void> {
   const { error } = await db().from("kore_notes").update({ status: "read" }).eq("family_id", familyId).eq("id", id);
   throwDb("markNoteAsRead", error);
+}
+
+export async function insertKoreNote(
+  client: KoreServerDbClient,
+  familyId: string,
+  data: KoreNoteInsert,
+): Promise<KoreNote> {
+  const { data: created, error } = await client
+    .from("kore_notes")
+    .insert({ ...data, family_id: familyId })
+    .select("*")
+    .single();
+  throwDb("insertKoreNote", error);
+  return created as KoreNote;
+}
+
+export async function getCorchoPhotoUrlsByNote(
+  client: KoreServerDbClient,
+  familyId: string,
+  noteIds: string[],
+): Promise<Record<string, string[]>> {
+  if (noteIds.length === 0) return {};
+  const { data, error } = await client
+    .from("kore_note_images")
+    .select("note_id, storage_path, created_at")
+    .eq("family_id", familyId)
+    .in("note_id", noteIds)
+    .order("created_at", { ascending: true });
+  if (error) {
+    if (isMissingCorchoPhotosTable(error)) return {};
+    throwDb("getCorchoPhotoUrls", error);
+  }
+
+  const rows = (data ?? []).filter((row) => isFamilyStoragePath(row.storage_path, familyId));
+  if (rows.length === 0) return {};
+
+  const { data: signed, error: signError } = await client.storage
+    .from(CORCHO_PHOTOS_BUCKET)
+    .createSignedUrls(
+      rows.map((row) => row.storage_path),
+      CORCHO_PHOTO_URL_TTL_SECONDS,
+    );
+  if (signError) {
+    if (/bucket not found/i.test(signError.message)) return {};
+    throwDb("getCorchoPhotoUrls.sign", signError);
+  }
+
+  const urlByPath = new Map<string, string>();
+  for (const item of signed ?? []) {
+    if (item.path && item.signedUrl && !item.error) urlByPath.set(item.path, item.signedUrl);
+  }
+
+  const grouped: Record<string, string[]> = {};
+  for (const row of rows) {
+    const url = urlByPath.get(row.storage_path);
+    if (!url) continue;
+    const list = grouped[row.note_id] ?? [];
+    list.push(url);
+    grouped[row.note_id] = list;
+  }
+  return grouped;
+}
+
+export async function saveCorchoNotePhotos(
+  client: KoreServerDbClient,
+  familyId: string,
+  noteId: string,
+  files: Uint8Array[],
+): Promise<void> {
+  if (files.length === 0) return;
+  const uploaded: string[] = [];
+  try {
+    for (const bytes of files) {
+      const storagePath = corchoPhotoStoragePath(familyId, noteId, crypto.randomUUID());
+      const { error } = await client.storage.from(CORCHO_PHOTOS_BUCKET).upload(storagePath, bytes, {
+        contentType: "image/jpeg",
+        upsert: false,
+        cacheControl: "3600",
+      });
+      if (error) throwDb("saveCorchoNotePhotos.upload", error);
+      uploaded.push(storagePath);
+    }
+
+    const { error: insertError } = await client.from("kore_note_images").insert(
+      uploaded.map((storage_path) => ({
+        note_id: noteId,
+        family_id: familyId,
+        storage_path,
+      })),
+    );
+    if (insertError) throwDb("saveCorchoNotePhotos.insert", insertError);
+  } catch (error) {
+    if (uploaded.length > 0) {
+      await client.storage.from(CORCHO_PHOTOS_BUCKET).remove(uploaded);
+    }
+    throw error;
+  }
+}
+
+async function listCorchoPhotoPaths(
+  client: KoreServerDbClient,
+  familyId: string,
+  noteId?: string,
+): Promise<string[]> {
+  let query = client.from("kore_note_images").select("storage_path").eq("family_id", familyId);
+  if (noteId) query = query.eq("note_id", noteId);
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingCorchoPhotosTable(error)) return [];
+    throwDb("listCorchoPhotoPaths", error);
+  }
+  return (data ?? []).map((row) => row.storage_path).filter((path) => isFamilyStoragePath(path, familyId));
+}
+
+async function removeCorchoPhotoObjects(client: KoreServerDbClient, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  const { error } = await client.storage.from(CORCHO_PHOTOS_BUCKET).remove(paths);
+  throwDb("removeCorchoPhotoObjects", error);
+}
+
+/** Borra los objetos del bucket y después la nota. Las filas de imagen caen por ON DELETE CASCADE. */
+export async function deleteKoreNote(client: KoreServerDbClient, familyId: string, noteId: string): Promise<void> {
+  const paths = await listCorchoPhotoPaths(client, familyId, noteId);
+  await removeCorchoPhotoObjects(client, paths);
+  const { error } = await client.from("kore_notes").delete().eq("family_id", familyId).eq("id", noteId);
+  throwDb("deleteKoreNote", error);
+}
+
+/** Vacía las fotos de una familia antes de borrar sus notas. Si la tabla aún no existe, no hace nada. */
+export async function removeFamilyCorchoPhotos(client: KoreServerDbClient, familyId: string): Promise<void> {
+  const paths = await listCorchoPhotoPaths(client, familyId);
+  await removeCorchoPhotoObjects(client, paths);
 }
 
 export async function getDomains(familyId: string): Promise<Domain[]> {
@@ -1519,6 +1658,8 @@ export async function deleteFamilyCascade(client: KoreServerDbClient, familyId: 
     .maybeSingle();
   throwDb("deleteFamily.read", readErr);
   if (!existing) throw new Error("Familia no encontrada");
+
+  await removeFamilyCorchoPhotos(client, trimmed);
 
   for (const table of FAMILY_SCOPED_TABLES) {
     await deleteFamilyScopedRows(client, table, trimmed);
