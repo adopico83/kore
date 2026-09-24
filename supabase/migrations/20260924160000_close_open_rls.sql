@@ -36,8 +36,11 @@ BEGIN
        OR pol.policyname ILIKE '%allow_all%'
        OR pol.policyname IN (
          'allow_insert_domains_on_register',
-         'kore_notifications_authenticated',
-         'family_isolation'
+         'kore_notifications_authenticated'
+       )
+       OR (
+         pol.policyname = 'family_isolation'
+         AND pol.tablename <> 'kore_note_images'
        )
     THEN
       EXECUTE format(
@@ -288,7 +291,10 @@ BEGIN
   END LOOP;
 END $$;
 
--- Fotos del Corcho: si existe la tabla, ciérrala por familia. El bucket no se toca.
+-- Fotos del Corcho (20260924140000_corcho_fotos.sql).
+-- family_isolation ya es por familia (family_id = get_my_family_id()). No se
+-- sustituye por otro nombre. Las policies corcho_fotos_* de storage.objects
+-- no se tocan: el bucket sigue privado y las URL firmadas van con la sesión.
 DO $$
 BEGIN
   IF to_regclass('public.kore_note_images') IS NULL THEN
@@ -298,23 +304,16 @@ BEGIN
   EXECUTE 'ALTER TABLE public.kore_note_images ENABLE ROW LEVEL SECURITY';
   EXECUTE 'REVOKE ALL ON TABLE public.kore_note_images FROM anon';
   EXECUTE 'REVOKE ALL ON TABLE public.kore_note_images FROM PUBLIC';
-
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'kore_note_images'
-      AND column_name = 'family_id'
-  ) THEN
-    EXECUTE 'DROP POLICY IF EXISTS kore_note_images_family ON public.kore_note_images';
-    EXECUTE $policy$
-      CREATE POLICY kore_note_images_family ON public.kore_note_images
-      FOR ALL TO authenticated
-      USING (family_id = (SELECT public.get_my_family_id()))
-      WITH CHECK (family_id = (SELECT public.get_my_family_id()))
-    $policy$;
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.kore_note_images TO authenticated';
-  END IF;
+  EXECUTE 'DROP POLICY IF EXISTS kore_note_images_family ON public.kore_note_images';
+  EXECUTE 'DROP POLICY IF EXISTS family_isolation ON public.kore_note_images';
+  EXECUTE $policy$
+    CREATE POLICY family_isolation ON public.kore_note_images
+      FOR ALL
+      USING (family_id = public.get_my_family_id())
+      WITH CHECK (family_id = public.get_my_family_id())
+  $policy$;
+  EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.kore_note_images TO authenticated';
+  EXECUTE 'GRANT ALL ON TABLE public.kore_note_images TO service_role';
 END $$;
 
 COMMIT;

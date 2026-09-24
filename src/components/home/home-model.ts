@@ -168,9 +168,26 @@ function mixPending(tasks: PendingRow[], limit: number): PendingRow[] {
   return mixed;
 }
 
-/** El corcho solo persiste texto. Las notas que fingían una foto se leen como tal. */
+/** Notas antiguas que fingían una foto (el texto 📎) se leen como tal. Las fotos reales van aparte. */
 export function honestCorchoText(content: string): string {
   const trimmed = content.trim();
   if (PHOTO_NOTE.test(trimmed)) return "Había una foto adjunta; no se guardó.";
   return content;
+}
+
+/** Texto del globo. Vacío cuando la nota solo lleva fotos. */
+export function corchoMessageText(content: string | null | undefined, imageCount: number): string {
+  const raw = (content ?? "").trim();
+  if (imageCount > 0 && (raw.length === 0 || PHOTO_NOTE.test(raw))) return "";
+  if (raw.length === 0) return "";
+  return honestCorchoText(raw);
+}
+
+/** Una línea para la tarjeta de inicio. */
+export function corchoNotePreview(content: string | null | undefined, imageCount: number): string {
+  const text = corchoMessageText(content, imageCount).trim();
+  if (text) return text;
+  if (imageCount === 1) return "Foto";
+  if (imageCount > 1) return `${imageCount} fotos`;
+  return "(nota sin texto)";
 }

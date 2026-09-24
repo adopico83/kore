@@ -10,6 +10,7 @@ import {
   getCalendarEvents,
   getExpenses,
   getHealthRecords,
+  getCorchoPhotoUrlsByNote,
   getKoreNotes,
   getShoppingItems,
   getPendingCleaningTasks,
@@ -126,7 +127,16 @@ export default async function Home() {
   ]);
 
   const initialDomains = initialDomainsAll.filter((domain) => domain.is_active === true);
-  const initialKoreNotes = allKoreNotes.slice(0, 3);
+  const latestNotes = allKoreNotes.slice(0, 3);
+  const photoUrls = await getCorchoPhotoUrlsByNote(
+    supabase,
+    familyId,
+    latestNotes.map((note) => note.id),
+  );
+  const initialKoreNotes = latestNotes.map((note) => ({
+    ...note,
+    imageUrls: photoUrls[note.id] ?? [],
+  }));
 
   let partnerHasAuthAccount = false;
   try {
