@@ -13,7 +13,7 @@ import {
   type Profile,
 } from "@/lib/kore-db";
 import { requireFamilySession } from "@/lib/require-family-session";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -303,15 +303,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const admin = createAdminClient();
+    const db = await createClient();
     const [memories, profiles, shoppingItems, pendingCleaningTasks, currentUserId] = await Promise.all([
-      getAgentMemory(familyId),
-      getProfiles(familyId),
-      getShoppingItems(familyId),
-      getPendingCleaningTasks(admin, familyId),
+      getAgentMemory(db, familyId),
+      getProfiles(db, familyId),
+      getShoppingItems(db, familyId),
+      getPendingCleaningTasks(db, familyId),
       getScopedUserId(),
     ]);
-    const agentCtx: AgentExecutionContext = { familyId, profiles, currentUserId };
+    const agentCtx: AgentExecutionContext = { familyId, profiles, currentUserId, db };
     const systemPrompt = buildSystemPrompt(memories);
     const familySnapshotText = buildFamilySnapshotText(profiles);
     const systemPromptWithFamily = `${systemPrompt}\n\n${familySnapshotText}`;

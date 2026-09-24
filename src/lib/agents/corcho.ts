@@ -84,7 +84,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       if (!from || !to || from === to || !content || !priority) {
         return { error: "Remitente, destinatario o contenido inválidos." };
       }
-      const row = await addKoreNote(familyId, {
+      const row = await addKoreNote(ctx.db, familyId, {
         sender_id: from,
         recipient_id: to,
         content,
@@ -97,18 +97,18 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     case "get_unread_notes": {
       const recipient = personToId(String(a.recipient ?? ""), profiles);
       if (!recipient) return { error: "Destinatario inválido." };
-      const notes = await getKoreNotes(familyId, recipient);
+      const notes = await getKoreNotes(ctx.db, familyId, recipient);
       const unread = notes.filter((n) => n.status === "unread");
       return { ok: true, notes: unread };
     }
     case "mark_note_read": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      await markNoteAsRead(familyId, id);
+      await markNoteAsRead(ctx.db, familyId, id);
       return { ok: true, id };
     }
     case "get_notes_history": {
-      const notes = await getKoreNotes(familyId);
+      const notes = await getKoreNotes(ctx.db, familyId);
       const sorted = [...notes].sort(
         (x, y) => new Date(y.created_at ?? "").getTime() - new Date(x.created_at ?? "").getTime(),
       );

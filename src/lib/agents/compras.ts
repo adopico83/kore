@@ -108,7 +108,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
             ).trim()
           : "") ||
         "";
-      const item = await addShoppingItem(ctx.familyId, {
+      const item = await addShoppingItem(ctx.db, ctx.familyId, {
         name,
         quantity: a.quantity != null ? String(a.quantity) : undefined,
         category,
@@ -118,23 +118,23 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       return { ok: true, item };
     }
     case "get_shopping_list": {
-      const items = await getShoppingItems(ctx.familyId);
+      const items = await getShoppingItems(ctx.db, ctx.familyId);
       return { ok: true, items };
     }
     case "complete_shopping_item": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para completar item de compras.");
-      await completeShoppingItem(ctx.familyId, id);
+      await completeShoppingItem(ctx.db, ctx.familyId, id);
       return { ok: true, completed: id };
     }
     case "delete_shopping_item": {
       const id = String(a.id ?? "").trim();
       if (!id) throw new Error("Falta id para eliminar item de compras.");
-      await deleteShoppingItem(ctx.familyId, id);
+      await deleteShoppingItem(ctx.db, ctx.familyId, id);
       return { ok: true, deleted: id };
     }
     case "clear_completed_items": {
-      await clearCompletedItems(ctx.familyId);
+      await clearCompletedItems(ctx.db, ctx.familyId);
       return { ok: true };
     }
     default:

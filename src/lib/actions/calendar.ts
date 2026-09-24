@@ -1,6 +1,6 @@
 "use server";
 
-import { getScopedFamilyId } from "@/lib/family-context";
+import { requireFamilyDb } from "@/lib/family-db";
 import {
   addCalendarEvent as dbAddCalendarEvent,
   deleteCalendarEvent as dbDeleteCalendarEvent,
@@ -9,35 +9,26 @@ import {
   type CalendarEventInsert,
   type CalendarEventRow,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
-
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
 
 export async function getCalendarEvents() {
-  const familyId = await requireFamilyId();
-  return dbGetCalendarEvents(familyId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetCalendarEvents(client, familyId);
 }
 
 export async function addCalendarEvent(data: CalendarEventInsert) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbAddCalendarEvent(admin, familyId, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbAddCalendarEvent(client, familyId, data);
 }
 
 export async function updateCalendarEvent(
   id: string,
   data: Partial<Pick<CalendarEventRow, "title" | "date" | "time" | "created_by">>,
 ) {
-  const familyId = await requireFamilyId();
-  return dbUpdateCalendarEvent(familyId, id, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbUpdateCalendarEvent(client, familyId, id, data);
 }
 
 export async function deleteCalendarEvent(id: string) {
-  const familyId = await requireFamilyId();
-  const admin = createAdminClient();
-  return dbDeleteCalendarEvent(admin, familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbDeleteCalendarEvent(client, familyId, id);
 }

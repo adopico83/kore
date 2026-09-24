@@ -86,23 +86,23 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const dish = String(a.dish ?? "").trim();
       const week_start = a.week_start ? String(a.week_start) : undefined;
       if (!day || !meal || !dish) throw new Error("Faltan campos para menú.");
-      const row = await addMenuItem(ctx.familyId, { day, meal, dish, week_start });
+      const row = await addMenuItem(ctx.db, ctx.familyId, { day, meal, dish, week_start });
       return { ok: true, item: row };
     }
     case "get_weekly_menu": {
       const week_start = a.week_start ? String(a.week_start) : undefined;
-      const menu = await getWeeklyMenu(ctx.familyId, week_start);
+      const menu = await getWeeklyMenu(ctx.db, ctx.familyId, week_start);
       return { ok: true, menu };
     }
     case "clear_day_menu": {
       const day = a.day as Day;
       const week_start = a.week_start ? String(a.week_start) : undefined;
       if (!day) throw new Error("Falta day para limpiar menú.");
-      await clearDayMenu(ctx.familyId, day, week_start);
+      await clearDayMenu(ctx.db, ctx.familyId, day, week_start);
       return { ok: true, day };
     }
     case "suggest_menu": {
-      const st = await getWeeklyMenu(ctx.familyId);
+      const st = await getWeeklyMenu(ctx.db, ctx.familyId);
       const pool = [
         "lentejas",
         "pasta con tomate",

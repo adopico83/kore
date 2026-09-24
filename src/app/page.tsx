@@ -99,7 +99,6 @@ export default async function Home() {
     );
   }
 
-  const admin = createAdminClient();
   const [
     initialProfiles,
     initialDomainsAll,
@@ -113,17 +112,17 @@ export default async function Home() {
     initialSleepSessions,
     initialSchoolEvents,
   ] = await Promise.all([
-    getProfiles(familyId),
-    getDomains(familyId),
-    getCalendarEvents(familyId),
-    getExpenses(familyId),
-    getHealthRecords(familyId),
-    getKoreNotes(familyId),
-    getShoppingItems(familyId),
-    getPendingCleaningTasks(admin, familyId),
-    getWeeklyMenu(familyId),
-    getSleepSessions(admin, familyId, 14),
-    getSchoolEvents(admin, familyId),
+    getProfiles(supabase, familyId),
+    getDomains(supabase, familyId),
+    getCalendarEvents(supabase, familyId),
+    getExpenses(supabase, familyId),
+    getHealthRecords(supabase, familyId),
+    getKoreNotes(supabase, familyId),
+    getShoppingItems(supabase, familyId),
+    getPendingCleaningTasks(supabase, familyId),
+    getWeeklyMenu(supabase, familyId),
+    getSleepSessions(supabase, familyId, 14),
+    getSchoolEvents(supabase, familyId),
   ]);
 
   const initialDomains = initialDomainsAll.filter((domain) => domain.is_active === true);

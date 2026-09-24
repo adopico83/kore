@@ -1,25 +1,24 @@
 "use server";
 
-import { getScopedFamilyId } from "@/lib/family-context";
-import { addKoreNote as dbAddKoreNote, getKoreNotes as dbGetKoreNotes, markNoteAsRead as dbMarkNoteAsRead, type KoreNoteInsert } from "@/lib/kore-db";
-
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
+import { requireFamilyDb } from "@/lib/family-db";
+import {
+  addKoreNote as dbAddKoreNote,
+  getKoreNotes as dbGetKoreNotes,
+  markNoteAsRead as dbMarkNoteAsRead,
+  type KoreNoteInsert,
+} from "@/lib/kore-db";
 
 export async function getKoreNotes(recipientId?: string) {
-  const familyId = await requireFamilyId();
-  return dbGetKoreNotes(familyId, recipientId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetKoreNotes(client, familyId, recipientId);
 }
 
 export async function addKoreNote(data: KoreNoteInsert) {
-  const familyId = await requireFamilyId();
-  return dbAddKoreNote(familyId, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbAddKoreNote(client, familyId, data);
 }
 
 export async function markNoteAsRead(id: string) {
-  const familyId = await requireFamilyId();
-  return dbMarkNoteAsRead(familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbMarkNoteAsRead(client, familyId, id);
 }

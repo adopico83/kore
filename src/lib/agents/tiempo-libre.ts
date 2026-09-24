@@ -92,7 +92,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const activity = String(a.activity ?? "").trim();
       if (!raw || !activity) throw new Error("Faltan person o activity en tiempo libre.");
       const person = leisurePersonLabel(raw, profiles);
-      const created = await addLeisureActivity(familyId, {
+      const created = await addLeisureActivity(ctx.db, familyId, {
         person,
         activity,
         date: a.date ? String(a.date) : undefined,
@@ -103,7 +103,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     case "get_leisure_activities": {
       const raw = a.person != null && String(a.person).trim() !== "" ? String(a.person) : undefined;
       const person = raw != null ? leisurePersonLabel(raw, profiles) : undefined;
-      const activities = await getLeisureActivities(familyId, person);
+      const activities = await getLeisureActivities(ctx.db, familyId, person);
       return { ok: true, activities };
     }
     case "log_personal_time": {
@@ -112,11 +112,11 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const minutes = Number(a.minutes);
       if (!raw || !description || Number.isNaN(minutes)) throw new Error("Datos inválidos para log_personal_time.");
       const person = leisurePersonLabel(raw, profiles);
-      const created = await logPersonalTime(familyId, person, description, minutes);
+      const created = await logPersonalTime(ctx.db, familyId, person, description, minutes);
       return { ok: true, log: created };
     }
     case "get_balance_summary": {
-      const st = await getLeisureActivities(familyId);
+      const st = await getLeisureActivities(ctx.db, familyId);
       const byBucket: Record<string, number> = {};
       for (const ac of st) {
         const m = ac.duration_minutes ?? 0;

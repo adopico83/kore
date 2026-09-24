@@ -1,25 +1,24 @@
 "use server";
 
-import { getScopedFamilyId } from "@/lib/family-context";
-import { addExpense as dbAddExpense, deleteExpense as dbDeleteExpense, getExpenses as dbGetExpenses, type ExpenseInsert } from "@/lib/kore-db";
-
-async function requireFamilyId(): Promise<string> {
-  const familyId = await getScopedFamilyId();
-  if (!familyId) throw new Error("No family context");
-  return familyId;
-}
+import { requireFamilyDb } from "@/lib/family-db";
+import {
+  addExpense as dbAddExpense,
+  deleteExpense as dbDeleteExpense,
+  getExpenses as dbGetExpenses,
+  type ExpenseInsert,
+} from "@/lib/kore-db";
 
 export async function getExpenses() {
-  const familyId = await requireFamilyId();
-  return dbGetExpenses(familyId);
+  const { familyId, client } = await requireFamilyDb();
+  return dbGetExpenses(client, familyId);
 }
 
 export async function addExpense(data: ExpenseInsert) {
-  const familyId = await requireFamilyId();
-  return dbAddExpense(familyId, data);
+  const { familyId, client } = await requireFamilyDb();
+  return dbAddExpense(client, familyId, data);
 }
 
 export async function deleteExpense(id: string) {
-  const familyId = await requireFamilyId();
-  return dbDeleteExpense(familyId, id);
+  const { familyId, client } = await requireFamilyDb();
+  return dbDeleteExpense(client, familyId, id);
 }

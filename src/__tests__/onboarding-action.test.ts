@@ -5,9 +5,18 @@ type DomainRow = { id: string; family_id: string | null; is_active: boolean | nu
 type ProfileRow = { id: string; name: string; family_id: string | null; role: string | null };
 
 const mockCreateAdminClient = vi.fn();
+const mockGetScopedFamilyId = vi.fn();
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mockCreateAdminClient,
+}));
+
+vi.mock("@/lib/family-context", () => ({
+  getScopedFamilyId: () => mockGetScopedFamilyId(),
+}));
+
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(),
 }));
 
 type FakeDbState = {
@@ -158,6 +167,20 @@ function createFakeAdminClient(initial: FakeDbState, options: FakeOptions = {}) 
 describe("completeOnboardingAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetScopedFamilyId.mockResolvedValue("fam-1");
+  });
+
+  it("sin familia no usa el cliente admin", async () => {
+    mockGetScopedFamilyId.mockResolvedValueOnce(null);
+    const { completeOnboardingAction } = await import("@/lib/actions/onboarding");
+    await expect(
+      completeOnboardingAction({
+        partnerName: "Ana",
+        childrenNames: [],
+        selectedDomainIds: [],
+      }),
+    ).resolves.toEqual({ success: false, error: "No family context" });
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
   });
 
   it("éxito completo: persiste familia, pareja, hijos y dominios", async () => {
@@ -176,7 +199,6 @@ describe("completeOnboardingAction", () => {
     const { completeOnboardingAction } = await import("@/lib/actions/onboarding");
     await expect(
       completeOnboardingAction({
-        familyId: "fam-1",
         partnerName: "Ana",
         childrenNames: ["Leo", "Mia"],
         selectedDomainIds: ["dom-1", "dom-2"],
@@ -212,7 +234,6 @@ describe("completeOnboardingAction", () => {
     const { completeOnboardingAction } = await import("@/lib/actions/onboarding");
     await expect(
       completeOnboardingAction({
-        familyId: "fam-1",
         partnerName: "Ana",
         childrenNames: ["Leo", "Mia"],
         selectedDomainIds: ["dom-1"],
@@ -237,7 +258,6 @@ describe("completeOnboardingAction", () => {
 
     const { completeOnboardingAction } = await import("@/lib/actions/onboarding");
     await completeOnboardingAction({
-      familyId: "fam-1",
       partnerName: " ",
       childrenNames: ["Leo"],
       selectedDomainIds: ["dom-1"],
@@ -260,7 +280,6 @@ describe("completeOnboardingAction", () => {
 
     const { completeOnboardingAction } = await import("@/lib/actions/onboarding");
     await completeOnboardingAction({
-      familyId: "fam-1",
       partnerName: "Ana",
       childrenNames: [],
       selectedDomainIds: ["dom-1"],
@@ -284,7 +303,6 @@ describe("completeOnboardingAction", () => {
     const { completeOnboardingAction } = await import("@/lib/actions/onboarding");
     await expect(
       completeOnboardingAction({
-        familyId: "fam-1",
         partnerName: "Ana",
         childrenNames: [],
         selectedDomainIds: ["dom-404"],

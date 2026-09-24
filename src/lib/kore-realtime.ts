@@ -4,8 +4,6 @@ import { useEffect, useRef } from "react";
 
 import { getBrowserClient } from "@/lib/supabase/client";
 
-const supabase = getBrowserClient();
-
 const REALTIME_TABLES = [
   "expenses",
   "kore_notes",
@@ -33,6 +31,7 @@ export function useKoreRealtime(onUpdate: (table: string) => void) {
   onUpdateRef.current = onUpdate;
 
   useEffect(() => {
+    const supabase = getBrowserClient();
     const channels = REALTIME_TABLES.map((table) =>
       supabase
         .channel(`kore-realtime:${table}`)

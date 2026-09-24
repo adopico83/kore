@@ -3,7 +3,7 @@
 import { Loader2, Mic } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
-import { getBrowserClient } from "@/lib/supabase/client";
+import { logQuickEvent } from "@/lib/actions/events";
 
 type QuickInputState =
   | "idle"
@@ -13,8 +13,6 @@ type QuickInputState =
   | "saving"
   | "saved"
   | "error";
-
-const PLACEHOLDER_USER = "ander-placeholder";
 
 const MEDICATION_KEYWORDS = [
   "paracetamol",
@@ -219,18 +217,10 @@ export function QuickInput() {
     setState("saving");
     setErrorMessage(null);
 
-    const supabase = getBrowserClient();
-    const type = inferEventType(trimmed);
-
-    const { error } = await supabase.from("events_log").insert({
-      user_id: PLACEHOLDER_USER,
-      type,
-      raw_input: trimmed,
-      domain_id: null,
-    });
-
-    if (error) {
-      setErrorMessage(error.message);
+    try {
+      await logQuickEvent(trimmed, inferEventType(trimmed));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo registrar");
       setState("error");
       return;
     }

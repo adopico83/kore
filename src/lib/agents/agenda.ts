@@ -8,8 +8,6 @@ import {
   getCalendarEvents,
   type CalendarEventInsert,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
-
 export const AGENT_DESCRIPTION =
   "Experto en calendario familiar. Gestiona ÚNICAMENTE eventos, citas familiares generales, fechas importantes y recordatorios del calendario.";
 
@@ -208,15 +206,14 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
         time,
         createdBy: row.created_by,
       });
-      const admin = createAdminClient();
-      const created = await addCalendarEvent(admin, ctx.familyId, row);
+      const created = await addCalendarEvent(ctx.db, ctx.familyId, row);
       console.log("[agenda] add_calendar_event output", created);
       return { ok: true, event: created };
     }
     case "get_calendar_events": {
       const from = (a.from_date as string | undefined)?.slice(0, 10);
       const to = (a.to_date as string | undefined)?.slice(0, 10);
-      let rows = await getCalendarEvents(ctx.familyId);
+      let rows = await getCalendarEvents(ctx.db, ctx.familyId);
       if (from) rows = rows.filter((r) => r.date >= from);
       if (to) rows = rows.filter((r) => r.date <= to);
       return { ok: true, events: rows };
@@ -224,8 +221,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     case "delete_calendar_event": {
       const id = String(a.id ?? "").trim();
       if (!id) return { error: "Falta id." };
-      const admin = createAdminClient();
-      await deleteCalendarEvent(admin, ctx.familyId, id);
+      await deleteCalendarEvent(ctx.db, ctx.familyId, id);
       return { ok: true, deleted: id };
     }
     case "get_upcoming_events": {
@@ -237,7 +233,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       end.setDate(end.getDate() + days);
       const fromStr = iso(today);
       const toStr = iso(end);
-      const rows = await getCalendarEvents(ctx.familyId);
+      const rows = await getCalendarEvents(ctx.db, ctx.familyId);
       const filtered = rows.filter((r) => r.date >= fromStr && r.date <= toStr);
       return { ok: true, days, events: filtered };
     }

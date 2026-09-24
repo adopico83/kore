@@ -8,7 +8,6 @@ import {
   getSleepSessions,
   getSleepSummaryFromSessions,
 } from "@/lib/kore-db";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 export const AGENT_DESCRIPTION =
   "Experto en gestión del sueño y rutinas nocturnas familiares. Gestiona ÚNICAMENTE sesiones de sueño (inicio, fin, despertares) por persona.";
@@ -85,8 +84,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     return { error: "Esta petición no es competencia del subagente de Sueño." };
   }
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-  const { familyId, profiles } = ctx;
-  const admin = createAdminClient();
+  const { familyId, profiles, db } = ctx;
 
   switch (toolName) {
     case "log_sleep_session": {
@@ -94,7 +92,7 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
       const sleep_start = String(a.sleep_start ?? "").trim();
       const sleep_end = String(a.sleep_end ?? "").trim();
       if (!sleep_start || !sleep_end) throw new Error("Faltan sleep_start o sleep_end.");
-      const row = await addSleepSession(admin, familyId, {
+      const row = await addSleepSession(db, familyId, {
         profile_id,
         sleep_start,
         sleep_end,
@@ -105,16 +103,16 @@ export async function execute(toolName: string, args: unknown, ctx: AgentExecuti
     }
     case "get_sleep_sessions": {
       const days = Math.min(30, Math.max(1, Number(a.days) || 7));
-      const sessions = await getSleepSessions(admin, familyId, days);
+      const sessions = await getSleepSessions(db, familyId, days);
       return { ok: true, days, sessions };
     }
     case "get_sleep_summary": {
       const days = Math.min(30, Math.max(1, Number(a.days) || 7));
-      const summary = await getSleepSummaryFromSessions(admin, familyId, days);
+      const summary = await getSleepSummaryFromSessions(db, familyId, days);
       return { ok: true, ...summary };
     }
     case "get_night_recovery_score": {
-      const result = await getNightRecoveryScore(familyId);
+      const result = await getNightRecoveryScore(db, familyId);
       return { ok: true, ...result, note: result.night_recovery_score == null ? "Sin métrica para hoy." : undefined };
     }
     default:

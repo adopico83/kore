@@ -13,10 +13,10 @@ const mockExecuteTool = vi.fn();
 const mockApplyGuardrails = vi.fn((plan) => plan);
 const mockCreate = vi.fn();
 
-const mockAdminClient = { from: vi.fn() };
+const mockSessionClient = { from: vi.fn() };
 
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(() => mockAdminClient),
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(async () => mockSessionClient),
 }));
 
 vi.mock("@/lib/kore-db", () => ({
@@ -116,6 +116,6 @@ describe("POST /api/agent", () => {
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ reply: "Todo OK", respuesta: "Todo OK" });
     expect(mockGetScopedFamilyId).toHaveBeenCalled();
-    expect(mockGetAgentMemory).toHaveBeenCalledWith("8378283a-cfc0-46ec-90c0-07e45c885aee");
+    expect(mockGetAgentMemory).toHaveBeenCalledWith(mockSessionClient, "8378283a-cfc0-46ec-90c0-07e45c885aee");
   });
 });

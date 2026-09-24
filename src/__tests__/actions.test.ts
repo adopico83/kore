@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGetScopedFamilyId = vi.fn();
+const mockSessionClient = { id: "session-client" };
 
 vi.mock("@/lib/family-context", () => ({
   getScopedFamilyId: mockGetScopedFamilyId,
+}));
+
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(async () => mockSessionClient),
 }));
 
 const mockDb = {
@@ -33,7 +38,7 @@ describe("server actions critical domains", () => {
     mockDb.getProfiles.mockResolvedValueOnce([]);
     const mod = await import("@/lib/actions/profiles");
     await mod.getProfiles();
-    expect(mockDb.getProfiles).toHaveBeenCalledWith("fam-1");
+    expect(mockDb.getProfiles).toHaveBeenCalledWith(mockSessionClient, "fam-1");
   });
 
   it("profiles.getProfiles: sin familyId lanza No family context", async () => {
@@ -47,7 +52,7 @@ describe("server actions critical domains", () => {
     mockDb.getCalendarEvents.mockResolvedValueOnce([]);
     const mod = await import("@/lib/actions/calendar");
     await mod.getCalendarEvents();
-    expect(mockDb.getCalendarEvents).toHaveBeenCalledWith("fam-1");
+    expect(mockDb.getCalendarEvents).toHaveBeenCalledWith(mockSessionClient, "fam-1");
   });
 
   it("calendar.getCalendarEvents: sin familyId lanza No family context", async () => {
@@ -61,7 +66,7 @@ describe("server actions critical domains", () => {
     mockDb.getKoreNotes.mockResolvedValueOnce([]);
     const mod = await import("@/lib/actions/corcho");
     await mod.getKoreNotes();
-    expect(mockDb.getKoreNotes).toHaveBeenCalledWith("fam-1", undefined);
+    expect(mockDb.getKoreNotes).toHaveBeenCalledWith(mockSessionClient, "fam-1", undefined);
   });
 
   it("corcho.getKoreNotes: sin familyId lanza No family context", async () => {
@@ -75,7 +80,7 @@ describe("server actions critical domains", () => {
     mockDb.getExpenses.mockResolvedValueOnce([]);
     const mod = await import("@/lib/actions/expenses");
     await mod.getExpenses();
-    expect(mockDb.getExpenses).toHaveBeenCalledWith("fam-1");
+    expect(mockDb.getExpenses).toHaveBeenCalledWith(mockSessionClient, "fam-1");
   });
 
   it("expenses.getExpenses: sin familyId lanza No family context", async () => {

@@ -1,18 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FAMILY_ID, addKoreNote, getDomains, getProfiles } from "@/lib/kore-db";
-
-vi.mock("@/lib/family-context", () => ({
-  getScopedFamilyId: vi.fn().mockResolvedValue("8378283a-cfc0-46ec-90c0-07e45c885aee"),
-}));
-
-const { mockGetBrowserClient } = vi.hoisted(() => ({
-  mockGetBrowserClient: vi.fn(),
-}));
-
-vi.mock("@/lib/supabase/client", () => ({
-  getBrowserClient: mockGetBrowserClient,
-}));
+import { FAMILY_ID, addEventLog, addKoreNote, getDomains, getKoreNotes, getProfiles } from "@/lib/kore-db";
 
 function createSelectBuilder(result: { data: unknown; error: unknown }) {
   const builder = {
@@ -28,15 +16,14 @@ describe("kore-db critical queries", () => {
     vi.clearAllMocks();
   });
 
-  it("getProfiles aplica family_id y devuelve filas", async () => {
+  it("getProfiles exige un cliente y filtra por family_id", async () => {
     const builder = createSelectBuilder({
       data: [{ id: "1", name: "Ander" }],
       error: null,
     });
     const client = { from: vi.fn(() => builder) };
-    mockGetBrowserClient.mockReturnValue(client);
 
-    const rows = await getProfiles(FAMILY_ID);
+    const rows = await getProfiles(client as never, FAMILY_ID);
 
     expect(client.from).toHaveBeenCalledWith("profiles");
     expect(builder.eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
@@ -48,9 +35,9 @@ describe("kore-db critical queries", () => {
       data: null,
       error: { message: "boom" },
     });
-    mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => builder) });
+    const client = { from: vi.fn(() => builder) };
 
-    const rows = await getProfiles(FAMILY_ID);
+    const rows = await getProfiles(client as never, FAMILY_ID);
 
     expect(rows).toEqual([]);
   });
@@ -60,9 +47,9 @@ describe("kore-db critical queries", () => {
       data: null,
       error: { message: "boom" },
     });
-    mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => builder) });
+    const builderClient = { from: vi.fn(() => builder) };
 
-    const rows = await getDomains(FAMILY_ID);
+    const rows = await getDomains(builderClient as never, FAMILY_ID);
 
     expect(builder.eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
     expect(rows).toEqual([]);
@@ -73,12 +60,33 @@ describe("kore-db critical queries", () => {
       data: [{ id: "d1", name: "Compras" }],
       error: null,
     });
-    mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => builder) });
+    const client = { from: vi.fn(() => builder) };
 
-    const rows = await getDomains(FAMILY_ID);
+    const rows = await getDomains(client as never, FAMILY_ID);
 
     expect(builder.eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
     expect(rows).toEqual([{ id: "d1", name: "Compras" }]);
+  });
+
+  it("getKoreNotes filtra por familia en el cliente recibido", async () => {
+    const builder = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      then(onfulfilled: (value: { data: unknown[]; error: null }) => unknown) {
+        return Promise.resolve({ data: [], error: null }).then(onfulfilled);
+      },
+    };
+    builder.select.mockReturnValue(builder);
+    builder.eq.mockReturnValue(builder);
+    builder.order.mockReturnValue(builder);
+    const client = { from: vi.fn(() => builder) };
+
+    await getKoreNotes(client as never, FAMILY_ID, "user-2");
+
+    expect(client.from).toHaveBeenCalledWith("kore_notes");
+    expect(builder.eq).toHaveBeenCalledWith("family_id", FAMILY_ID);
+    expect(builder.eq).toHaveBeenCalledWith("recipient_id", "user-2");
   });
 
   it("addKoreNote inserta con family_id y devuelve la fila creada", async () => {
@@ -86,9 +94,9 @@ describe("kore-db critical queries", () => {
     const select = vi.fn(() => ({ single }));
     const insert = vi.fn(() => ({ select }));
     const from = vi.fn(() => ({ insert }));
-    mockGetBrowserClient.mockReturnValue({ from });
+    const client = { from };
 
-    const row = await addKoreNote(FAMILY_ID, {
+    const row = await addKoreNote(client as never, FAMILY_ID, {
       sender_id: "u1",
       recipient_id: "u2",
       content: "hola",
@@ -113,10 +121,10 @@ describe("kore-db critical queries", () => {
     }));
     const select = vi.fn(() => ({ single }));
     const insert = vi.fn(() => ({ select }));
-    mockGetBrowserClient.mockReturnValue({ from: vi.fn(() => ({ insert })) });
+    const client = { from: vi.fn(() => ({ insert })) };
 
     await expect(
-      addKoreNote(FAMILY_ID, {
+      addKoreNote(client as never, FAMILY_ID, {
         sender_id: "u1",
         recipient_id: "u2",
         content: "hola",
@@ -124,5 +132,25 @@ describe("kore-db critical queries", () => {
         priority: "medium",
       }),
     ).rejects.toThrow("addKoreNote: insert failed");
+  });
+
+  it("addEventLog escribe family_id y user_id de la sesión", async () => {
+    const insert = vi.fn(async () => ({ error: null }));
+    const from = vi.fn(() => ({ insert }));
+    const client = { from };
+
+    await addEventLog(client as never, FAMILY_ID, "user-1", {
+      type: "note",
+      raw_input: "comprar leche",
+    });
+
+    expect(from).toHaveBeenCalledWith("events_log");
+    expect(insert).toHaveBeenCalledWith({
+      family_id: FAMILY_ID,
+      user_id: "user-1",
+      type: "note",
+      raw_input: "comprar leche",
+      domain_id: null,
+    });
   });
 });
