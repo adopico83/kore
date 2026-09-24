@@ -63,6 +63,46 @@ describe("addCorchoNote", () => {
     await expect(addCorchoNote(png)).rejects.toThrow("Las fotos tienen que ser JPEG.");
   });
 
+  it("acepta una nota solo con foto e inserta content nulo", async () => {
+    const { addCorchoNote } = await import("@/lib/actions/corcho");
+    const formData = new FormData();
+    formData.set("recipient_id", "user-2");
+    formData.append("photos", jpegFile());
+
+    await addCorchoNote(formData);
+
+    expect(mockDb.insertKoreNote).toHaveBeenCalledWith(
+      mockSessionClient,
+      "fam-1",
+      expect.objectContaining({
+        sender_id: "user-1",
+        recipient_id: "user-2",
+        content: null,
+        audio_url: null,
+      }),
+    );
+    expect(mockDb.saveCorchoNotePhotos).toHaveBeenCalledWith(
+      mockSessionClient,
+      "fam-1",
+      "note-1",
+      [expect.any(Uint8Array)],
+    );
+    expect(mockDb.deleteKoreNote).not.toHaveBeenCalled();
+  });
+
+  it("borra la nota si falla la subida de la foto", async () => {
+    mockDb.saveCorchoNotePhotos.mockRejectedValueOnce(new Error("bucket not found"));
+    const { addCorchoNote } = await import("@/lib/actions/corcho");
+    const formData = new FormData();
+    formData.set("recipient_id", "user-2");
+    formData.append("photos", jpegFile());
+
+    await expect(addCorchoNote(formData)).rejects.toThrow(
+      "Las fotos del corcho aún no están activas en el servidor.",
+    );
+    expect(mockDb.deleteKoreNote).toHaveBeenCalledWith(mockSessionClient, "fam-1", "note-1");
+  });
+
   it("guarda la nota y sube las fotos con el remitente de la sesión", async () => {
     const { addCorchoNote } = await import("@/lib/actions/corcho");
     const formData = new FormData();
