@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useOptimistic, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { SaludPickerField } from "@/components/SaludModal/SaludPickerField";
@@ -10,13 +10,15 @@ import {
   getHealthRecords,
   updateHealthRecord,
 } from "@/lib/actions/health";
-import type { Profile } from "@/lib/kore-db";
+import type { HealthRecord, Profile } from "@/lib/kore-db";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { applySaludAction, type SaludListAction } from "@/lib/optimistic-state";
 import {
   buildCitaHealthInsert,
   buildCitaHealthUpdate,
   buildMedHealthInsert,
   buildMedHealthUpdate,
+  commitHealthRecord,
   saludFromHealthRecords,
 } from "@/lib/kore-salud-sync";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
@@ -29,6 +31,7 @@ type Cita = {
   fecha: string;
   hora: string;
   lugar: string;
+  pending?: boolean;
 };
 
 type Medicacion = {
@@ -37,6 +40,7 @@ type Medicacion = {
   dosis: string;
   frecuenciaHoras: number;
   proximaToma: string;
+  pending?: boolean;
 };
 
 export type SaludData = Record<string, { citas: Cita[]; medicaciones: Medicacion[] }>;
@@ -89,9 +93,10 @@ export type SaludModalProps = {
   onClose: () => void;
   profiles?: Profile[];
   onChange?: (data: SaludData) => void;
+  onRecordSaved?: (record: HealthRecord) => void;
 };
 
-export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps) {
+export function SaludModal({ onClose, profiles = [], onChange, onRecordSaved }: SaludModalProps) {
   useEscapeKey(onClose);
   const safeProfiles = profiles ?? [];
   const [data, setData] = useState<SaludData>(() => readSalud(safeProfiles));
@@ -121,6 +126,11 @@ export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps
   const [dosis, setDosis] = useState("");
   const [frecuenciaHoras, setFrecuenciaHoras] = useState("");
   const [proximaToma, setProximaToma] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [optimisticSalud, applyOptimisticSalud] = useOptimistic(
+    data,
+    (state: SaludData, action: SaludListAction<Cita, Medicacion>) => applySaludAction(state, action),
+  );
 
   useEffect(() => {
     setData(readSalud(safeProfiles));
@@ -128,10 +138,13 @@ export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps
     setMiembro((current) => current || safeProfiles[0]?.id || "");
   }, [safeProfiles]);
 
-  const applyLocal = (next: SaludData) => {
-    setData(next);
-    saveSalud(next);
-    onChange?.(next);
+  const applyLocal = (next: SaludData | ((prev: SaludData) => SaludData)) => {
+    setData((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      saveSalud(resolved);
+      queueMicrotask(() => onChange?.(resolved));
+      return resolved;
+    });
   };
 
   const reloadFromRemote = async () => {
@@ -153,83 +166,55 @@ export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps
 
   const totalPendientes = useMemo(
     () =>
-      Object.values(data).reduce(
+      Object.values(optimisticSalud).reduce(
         (acc, member) => acc + member.citas.length + member.medicaciones.length,
         0,
       ),
-    [data],
+    [optimisticSalud],
   );
 
-  const addItem = async () => {
+  const addItem = () => {
     if (!miembro) return;
     if (tipo === "cita") {
       if (!descripcion.trim() || !fecha || !hora) return;
-      try {
-        await addHealthRecord(
-          buildCitaHealthInsert(miembro, {
-            descripcion: descripcion.trim(),
-            fecha,
-            hora,
-            lugar: lugar.trim(),
-          }),
-        );
-        setDescripcion("");
-        setFecha("");
-        setHora("");
-        setLugar("");
-        await reloadFromRemote();
-        emitKoreUpdate(["health_records", "calendar_events"]);
-      } catch {
-        const next = structuredClone(data);
-        if (!next[miembro]) next[miembro] = emptyMember();
-        next[miembro].citas.push({
-          id: crypto.randomUUID?.() ?? `cita_${Date.now()}`,
-          descripcion: descripcion.trim(),
-          fecha,
-          hora,
-          lugar: lugar.trim(),
-        });
-        setDescripcion("");
-        setFecha("");
-        setHora("");
-        setLugar("");
-        update(next);
-      }
+      const tempId = crypto.randomUUID();
+      const draft = { descripcion: descripcion.trim(), fecha, hora, lugar: lugar.trim() };
+      setSaveError("");
+      setDescripcion("");
+      setFecha("");
+      setHora("");
+      setLugar("");
+      startTransition(async () => {
+        applyOptimisticSalud({ type: "add-cita", memberId: miembro, cita: { id: tempId, ...draft, pending: true } });
+        try {
+          const record = await addHealthRecord({ ...buildCitaHealthInsert(miembro, draft), id: tempId });
+          applyLocal((prev) => commitHealthRecord(prev, safeProfiles, record, tempId));
+          onRecordSaved?.(record);
+        } catch {
+          setSaveError("No se pudo guardar la cita. Se ha deshecho.");
+        }
+      });
       return;
     }
     const freq = Number(frecuenciaHoras);
     if (!nombre.trim() || !dosis.trim() || Number.isNaN(freq) || freq <= 0 || !proximaToma) return;
-    try {
-      await addHealthRecord(
-        buildMedHealthInsert(miembro, {
-          nombre: nombre.trim(),
-          dosis: dosis.trim(),
-          frecuenciaHoras: freq,
-          proximaToma,
-        }),
-      );
-      setNombre("");
-      setDosis("");
-      setFrecuenciaHoras("");
-      setProximaToma("");
-      await reloadFromRemote();
-      emitKoreUpdate(["health_records"]);
-    } catch {
-      const next = structuredClone(data);
-      if (!next[miembro]) next[miembro] = emptyMember();
-      next[miembro].medicaciones.push({
-        id: crypto.randomUUID?.() ?? `med_${Date.now()}`,
-        nombre: nombre.trim(),
-        dosis: dosis.trim(),
-        frecuenciaHoras: freq,
-        proximaToma,
-      });
-      setNombre("");
-      setDosis("");
-      setFrecuenciaHoras("");
-      setProximaToma("");
-      update(next);
-    }
+    const tempId = crypto.randomUUID();
+    const draft = { nombre: nombre.trim(), dosis: dosis.trim(), frecuenciaHoras: freq, proximaToma };
+    setSaveError("");
+    setNombre("");
+    setDosis("");
+    setFrecuenciaHoras("");
+    setProximaToma("");
+    startTransition(async () => {
+      applyOptimisticSalud({ type: "add-med", memberId: miembro, med: { id: tempId, ...draft, pending: true } });
+      try {
+        const record = await addHealthRecord({ ...buildMedHealthInsert(miembro, draft), id: tempId });
+        applyLocal((prev) => commitHealthRecord(prev, safeProfiles, record, tempId));
+        onRecordSaved?.(record);
+      } catch {
+        setSaveError("No se pudo guardar la medicación. Se ha deshecho.");
+      }
+    });
   };
 
   const removeCita = async (memberId: string, id: string) => {
@@ -355,7 +340,7 @@ export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps
         </section>
 
         {(safeProfiles ?? []).map((member, index) => {
-          const memberData = data[member.id] ?? emptyMember();
+          const memberData = optimisticSalud[member.id] ?? emptyMember();
           const sectionOpen = openMember === member.id;
           const colors = ["#4CC9A0", "#2CB1A3", "#EF9F27", "#9B8FE8"];
           const memberColor = colors[index % colors.length];
@@ -418,7 +403,7 @@ export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps
                           const key = `cita:${member.id}:${c.id}`;
                           const isEditing = editingKey === key;
                           return (
-                            <li key={c.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8 }}>
+                            <li key={c.id} aria-busy={c.pending ? true : undefined} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8, opacity: c.pending ? 0.55 : 1 }}>
                               {isEditing ? (
                                 <div style={{ display: "grid", gap: 8 }}>
                                   <input value={editCitaDraft.descripcion} onChange={(e) => setEditCitaDraft((d) => ({ ...d, descripcion: e.target.value }))} placeholder="Descripción" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
@@ -460,7 +445,7 @@ export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps
                           const key = `med:${member.id}:${m.id}`;
                           const isEditing = editingKey === key;
                           return (
-                            <li key={m.id} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8 }}>
+                            <li key={m.id} aria-busy={m.pending ? true : undefined} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "#1c2028", padding: 10, marginBottom: 8, opacity: m.pending ? 0.55 : 1 }}>
                               {isEditing ? (
                                 <div style={{ display: "grid", gap: 8 }}>
                                   <input value={editMedDraft.nombre} onChange={(e) => setEditMedDraft((d) => ({ ...d, nombre: e.target.value }))} placeholder="Nombre" style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#e4e6ed", padding: "10px 12px", fontSize: 16 }} />
@@ -498,6 +483,11 @@ export function SaludModal({ onClose, profiles = [], onChange }: SaludModalProps
 
         <section style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "#161a22", padding: 12 }}>
           <p style={{ margin: "0 0 8px", fontSize: 12, color: "rgba(228,230,237,0.65)" }}>Añadir registro</p>
+          {saveError ? (
+            <p role="alert" style={{ margin: "0 0 8px", fontSize: 12, color: "#fecaca" }}>
+              {saveError}
+            </p>
+          ) : null}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <select value={tipo} onChange={(e) => setTipo(e.target.value as "cita" | "medicacion")} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "#e4e6ed", color: "#111318", padding: "10px 12px", fontSize: 16 }}>
               <option value="cita" style={{ color: "#111318", background: "#e4e6ed" }}>Cita</option>

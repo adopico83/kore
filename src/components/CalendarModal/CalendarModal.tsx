@@ -3,7 +3,6 @@
 import { ChevronLeft, ChevronRight, Pencil, Trash2, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { emitKoreUpdate } from "@/lib/kore-events";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 
 export type KoreAgendaEvent = {
@@ -11,6 +10,7 @@ export type KoreAgendaEvent = {
   titulo: string;
   fecha: string;
   hora: string | null;
+  pending?: boolean;
 };
 
 const DIAS_SEMANA_CORTO = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -94,6 +94,7 @@ export function CalendarModal({
   const [nuevoTitulo, setNuevoTitulo] = useState("");
   const [nuevaHora, setNuevaHora] = useState("");
   const [agendaAccionLoading, setAgendaAccionLoading] = useState(false);
+  const [agendaError, setAgendaError] = useState("");
   const composerRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -157,11 +158,11 @@ export function CalendarModal({
     const titulo = draftTitulo.trim();
     if (!titulo) return;
     setAgendaAccionLoading(true);
+    setAgendaError("");
     try {
       const horaVal = draftHora.trim();
       if (useRemote && onUpdateEvent) {
         await onUpdateEvent(agendaEditandoId, { titulo, hora: horaVal.length > 0 ? horaVal : null });
-        emitKoreUpdate(["calendar_events"]);
       } else if (onChange) {
         onChange(
           events.map((e) =>
@@ -170,6 +171,8 @@ export function CalendarModal({
         );
       }
       cancelarEdicion();
+    } catch {
+      setAgendaError("No se pudo guardar el cambio. Se ha deshecho.");
     } finally {
       setAgendaAccionLoading(false);
     }
@@ -180,11 +183,11 @@ export function CalendarModal({
       if (agendaAccionLoading) return;
       if (!window.confirm("¿Eliminar este evento?")) return;
       setAgendaAccionLoading(true);
+      setAgendaError("");
       try {
         const fechaKey = (ev.fecha ?? "").slice(0, 10);
         if (useRemote && onDeleteEvent) {
           await onDeleteEvent(ev.id);
-          emitKoreUpdate(["calendar_events"]);
         } else if (onChange) {
           const next = events.filter((e) => e.id !== ev.id);
           onChange(next);
@@ -194,6 +197,8 @@ export function CalendarModal({
           }
         }
         if (agendaEditandoId === ev.id) cancelarEdicion();
+      } catch {
+        setAgendaError("No se pudo eliminar el evento. Sigue en la agenda.");
       } finally {
         setAgendaAccionLoading(false);
       }
@@ -205,12 +210,14 @@ export function CalendarModal({
     if (!diaDetalleFecha || agendaAccionLoading) return;
     const titulo = nuevoTitulo.trim();
     if (!titulo) return;
+    const horaVal = nuevaHora.trim();
     setAgendaAccionLoading(true);
+    setAgendaError("");
+    setNuevoTitulo("");
+    setNuevaHora("");
     try {
-      const horaVal = nuevaHora.trim();
       if (useRemote && onAddEvent) {
         await onAddEvent({ titulo, fecha: diaDetalleFecha, hora: horaVal.length > 0 ? horaVal : null });
-        emitKoreUpdate(["calendar_events"]);
       } else if (onChange) {
         const nuevo: KoreAgendaEvent = {
           id: newId(),
@@ -222,6 +229,10 @@ export function CalendarModal({
       }
       setNuevoTitulo("");
       setNuevaHora("");
+    } catch {
+      setNuevoTitulo(titulo);
+      setNuevaHora(horaVal);
+      setAgendaError("No se pudo guardar el evento. Se ha deshecho.");
     } finally {
       setAgendaAccionLoading(false);
     }
@@ -520,11 +531,13 @@ export function CalendarModal({
                 {(eventosPorFecha.get(diaDetalleFecha) ?? []).map((ev) => (
                   <li
                     key={ev.id}
+                    aria-busy={ev.pending ? true : undefined}
                     style={{
                       borderRadius: 8,
                       border: "1px solid rgba(255,255,255,0.1)",
                       background: "rgba(9,11,16,0.95)",
                       padding: "10px 12px",
+                      opacity: ev.pending ? 0.55 : 1,
                     }}
                   >
                     {agendaEditandoId === ev.id ? (
@@ -658,6 +671,11 @@ export function CalendarModal({
                 >
                   Nueva cita
                 </p>
+                {agendaError ? (
+                  <p role="alert" style={{ margin: 0, fontSize: 12, color: "#fecaca" }}>
+                    {agendaError}
+                  </p>
+                ) : null}
                 <input
                   ref={composerRef}
                   type="text"

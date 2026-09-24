@@ -46,6 +46,14 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  // Las server actions no cambian de página: quien autoriza el dato es
+  // requireFamilyDb (RLS + familia de la sesión). Consultar profiles aquí
+  // repetía ese trabajo en cada alta. El redirect de onboarding se queda
+  // en las navegaciones (documento y RSC), que sí pueden llevar a otra ruta.
+  if (request.headers.has("next-action")) {
+    return response;
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("family_id")

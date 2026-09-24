@@ -1,8 +1,9 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useOptimistic, useState } from "react";
 import { emitKoreUpdate } from "@/lib/kore-events";
+import { applyListMutation, upsertById } from "@/lib/optimistic-state";
 import { useEscapeKey } from "@/lib/hooks/useEscapeKey";
 import {
   addShoppingItem,
@@ -39,6 +40,13 @@ export type DomainModalProps = {
   historyReadOnly?: boolean;
   /** Perfiles familiares (paneles Limpieza / Sueño). */
   profiles?: Profile[];
+  /** Lista viva de compras (incluye filas pendientes de confirmar). */
+  shoppingItems?: Array<ShoppingItemRow & { pending?: boolean }>;
+  shoppingError?: string;
+  onAddShoppingItem?: (name: string) => Promise<void>;
+  onCompleteShoppingItem?: (id: string) => void;
+  onDeleteShoppingItem?: (id: string) => void;
+  onReactivateShoppingItem?: (id: string) => void;
 };
 
 const cardStyle: CSSProperties = {
@@ -82,6 +90,12 @@ export function DomainModal({
   historyEntries,
   historyReadOnly,
   profiles = [],
+  shoppingItems: externalShoppingItems,
+  shoppingError,
+  onAddShoppingItem,
+  onCompleteShoppingItem,
+  onDeleteShoppingItem,
+  onReactivateShoppingItem,
 }: DomainModalProps) {
   useEscapeKey(onClose);
   const isCompras = isComprasDomainName(domain.name);
@@ -92,8 +106,18 @@ export function DomainModal({
   const [notes, setNotes] = useState<string[]>(domain.notes ?? []);
   const [newNote, setNewNote] = useState("");
   const [newShoppingName, setNewShoppingName] = useState("");
-  const [shoppingItems, setShoppingItems] = useState<ShoppingItemRow[]>([]);
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItemRow[]>(externalShoppingItems ?? []);
   const [shoppingLoading, setShoppingLoading] = useState(false);
+  const [localShoppingError, setLocalShoppingError] = useState("");
+  const shoppingControlled = externalShoppingItems !== undefined;
+  const [optimisticLocalShopping, applyLocalShopping] = useOptimistic(
+    shoppingItems,
+    applyListMutation<ShoppingItemRow & { pending?: boolean }>,
+  );
+  const visibleShopping: Array<ShoppingItemRow & { pending?: boolean }> = shoppingControlled
+    ? externalShoppingItems
+    : optimisticLocalShopping;
+  const shownShoppingError = shoppingError || localShoppingError;
 
   const [history, setHistory] = useState<DomainHistoryEntry[]>(() => {
     if (isComprasDomainName(domain.name)) return [];
@@ -155,18 +179,18 @@ export function DomainModal({
   }, [domain.id, domain.name, domain.owner, domain.state, domain.notes, historyEntries, historyReadOnly]);
 
   useEffect(() => {
-    if (!isCompras) return;
+    if (!isCompras || shoppingControlled) return;
     void loadShoppingItems();
-  }, [isCompras, domain.id, loadShoppingItems]);
+  }, [isCompras, domain.id, loadShoppingItems, shoppingControlled]);
 
   const pendingShopping = useMemo(
-    () => shoppingItems.filter((r) => !r.completed),
-    [shoppingItems],
+    () => visibleShopping.filter((r) => !r.completed),
+    [visibleShopping],
   );
   const completedShopping = useMemo(() => {
-    const done = shoppingItems.filter((r) => r.completed);
+    const done = visibleShopping.filter((r) => r.completed);
     return [...done].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
-  }, [shoppingItems]);
+  }, [visibleShopping]);
 
   const removeHistoryEntry = (entryId: string) => {
     if (historyReadOnly) return;
@@ -182,45 +206,89 @@ export function DomainModal({
   const handleAddShoppingItem = async () => {
     const name = newShoppingName.trim();
     if (!name) return;
-    try {
-      if (!actorId) return;
-      await addShoppingItem({ name, created_by: actorId });
-      emitKoreUpdate(["shopping_items"]);
-      setNewShoppingName("");
-      await loadShoppingItems();
-    } catch {
-      /* ignore */
+    if (!actorId && !onAddShoppingItem) return;
+    setLocalShoppingError("");
+    setNewShoppingName("");
+    if (onAddShoppingItem) {
+      try {
+        await onAddShoppingItem(name);
+      } catch {
+        setLocalShoppingError("No se pudo añadir el producto. Se ha deshecho.");
+      }
+      return;
     }
+    const id = crypto.randomUUID();
+    const draft: ShoppingItemRow & { pending?: boolean } = {
+      id,
+      name,
+      quantity: null,
+      category: null,
+      priority: null,
+      completed: false,
+      created_by: actorId ?? null,
+      created_at: new Date().toISOString(),
+      pending: true,
+    };
+    startTransition(async () => {
+      applyLocalShopping({ type: "add", item: draft });
+      try {
+        const row = await addShoppingItem({ id, name, created_by: actorId });
+        setShoppingItems((prev) => upsertById(prev, row, "start"));
+      } catch {
+        setLocalShoppingError("No se pudo añadir el producto. Se ha deshecho.");
+      }
+    });
   };
 
-  const handleCompleteShopping = async (id: string) => {
-    try {
-      await completeShoppingItem(id);
-      emitKoreUpdate(["shopping_items"]);
-      await loadShoppingItems();
-    } catch {
-      /* ignore */
+  const handleCompleteShopping = (id: string) => {
+    if (onCompleteShoppingItem) {
+      onCompleteShoppingItem(id);
+      return;
     }
+    setLocalShoppingError("");
+    startTransition(async () => {
+      applyLocalShopping({ type: "patch", id, patch: { completed: true, pending: true } });
+      try {
+        await completeShoppingItem(id);
+        setShoppingItems((prev) => prev.map((item) => (item.id === id ? { ...item, completed: true } : item)));
+      } catch {
+        setLocalShoppingError("No se pudo completar la compra. Se ha deshecho.");
+      }
+    });
   };
 
-  const handleDeleteShopping = async (id: string) => {
-    try {
-      await deleteShoppingItem(id);
-      emitKoreUpdate(["shopping_items"]);
-      await loadShoppingItems();
-    } catch {
-      /* ignore */
+  const handleDeleteShopping = (id: string) => {
+    if (onDeleteShoppingItem) {
+      onDeleteShoppingItem(id);
+      return;
     }
+    setLocalShoppingError("");
+    startTransition(async () => {
+      applyLocalShopping({ type: "remove", id });
+      try {
+        await deleteShoppingItem(id);
+        setShoppingItems((prev) => prev.filter((item) => item.id !== id));
+      } catch {
+        setLocalShoppingError("No se pudo eliminar el producto. Se ha deshecho.");
+      }
+    });
   };
 
-  const handleReactivateShopping = async (id: string) => {
-    try {
-      await reactivateShoppingItem(id);
-      emitKoreUpdate(["shopping_items"]);
-      await loadShoppingItems();
-    } catch {
-      /* ignore */
+  const handleReactivateShopping = (id: string) => {
+    if (onReactivateShoppingItem) {
+      onReactivateShoppingItem(id);
+      return;
     }
+    setLocalShoppingError("");
+    startTransition(async () => {
+      applyLocalShopping({ type: "patch", id, patch: { completed: false, pending: true } });
+      try {
+        await reactivateShoppingItem(id);
+        setShoppingItems((prev) => prev.map((item) => (item.id === id ? { ...item, completed: false } : item)));
+      } catch {
+        setLocalShoppingError("No se pudo reactivar el producto. Se ha deshecho.");
+      }
+    });
   };
 
   const notesToSave = isCompras || isDataPanel ? (domain.notes ?? []) : notes;
@@ -361,6 +429,11 @@ export function DomainModal({
                 Añadir
               </button>
             </div>
+            {shownShoppingError ? (
+              <p role="alert" style={{ margin: "0 0 8px", fontSize: 12, color: "#fecaca" }}>
+                {shownShoppingError}
+              </p>
+            ) : null}
             {shoppingLoading ? (
               <p style={{ margin: 0, fontSize: 13, color: "rgba(228,230,237,0.55)" }}>Cargando lista…</p>
             ) : pendingShopping.length === 0 ? (
@@ -370,6 +443,7 @@ export function DomainModal({
                 {pendingShopping.map((item) => (
                   <li
                     key={item.id}
+                    aria-busy={item.pending ? true : undefined}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -379,6 +453,7 @@ export function DomainModal({
                       border: "1px solid rgba(255,255,255,0.08)",
                       background: "rgba(255,255,255,0.04)",
                       padding: "7px 9px",
+                      opacity: item.pending ? 0.55 : 1,
                     }}
                   >
                     <div style={{ minWidth: 0 }}>
@@ -531,6 +606,7 @@ export function DomainModal({
                     return (
                       <li
                         key={item.id}
+                        aria-busy={item.pending ? true : undefined}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -541,6 +617,7 @@ export function DomainModal({
                           color: "rgba(228,230,237,0.92)",
                           padding: "4px 6px 4px 10px",
                           maxWidth: "100%",
+                          opacity: item.pending ? 0.55 : 1,
                         }}
                       >
                         <span

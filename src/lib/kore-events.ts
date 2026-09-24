@@ -28,3 +28,25 @@ export function onKoreUpdate(callback: (tables: KoreTable[]) => void): () => voi
   window.addEventListener("kore-update", handler);
   return () => window.removeEventListener("kore-update", handler);
 }
+
+export type KoreRemoteChange = {
+  table: string;
+  event: "INSERT" | "UPDATE" | "DELETE";
+  row: Record<string, unknown> | null;
+  id: string | null;
+};
+
+/** Filas de Realtime ya normalizadas, para que cada vista las mezcle por id. */
+export function emitKoreRemoteChanges(changes: KoreRemoteChange[]) {
+  if (typeof window === "undefined" || changes.length === 0) return;
+  window.dispatchEvent(new CustomEvent("kore-remote-change", { detail: changes }));
+}
+
+export function onKoreRemoteChanges(callback: (changes: KoreRemoteChange[]) => void): () => void {
+  const handler = (event: Event) => {
+    const detail = (event as CustomEvent<KoreRemoteChange[]>).detail;
+    callback(Array.isArray(detail) ? detail : []);
+  };
+  window.addEventListener("kore-remote-change", handler);
+  return () => window.removeEventListener("kore-remote-change", handler);
+}
