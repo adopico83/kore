@@ -1,292 +1,231 @@
-# Kore
+<p align="center">
+  <img src="public/kore-logo.svg" alt="Kore" width="96" height="96" />
+</p>
 
-**El sistema operativo de tu hogar.** Una PWA que convierte el caos doméstico en calma: compras, agenda, colegio, sueño, economía y más — con un orquestador de IA que actúa, no solo responde.
+<h1 align="center">Kore</h1>
 
----
+<p align="center">
+  El sistema operativo de tu hogar.<br />
+  Menos carga mental, más calma en casa.
+</p>
 
-## ¿Qué es Kore?
+<p align="center">
+  <a href="https://kore-ochre.vercel.app"><strong>Abrir la app</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#instalar-como-pwa">Instalar como PWA</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/adopico83/kore">GitHub</a>
+</p>
 
-Kore es un **sistema operativo del hogar familiar**: un único lugar donde la familia organiza la vida diaria, delega la carga mental y mantiene todo sincronizado.
-
-- **PWA instalable** en iOS y Android (añadir a pantalla de inicio; experiencia casi nativa).
-- **Multi-familia**: registro, onboarding e invitación por código para que cada hogar tenga su espacio aislado.
-- **IA con acción**: el ORC (Orquestador) entiende el contexto familiar y ejecuta herramientas reales contra la base de datos.
-
-### Stack
-
-| Capa | Tecnología |
-|------|------------|
-| Frontend | Next.js 16 · React 19 · TypeScript |
-| Estilos | Tailwind CSS 4 |
-| Backend / DB | Supabase (Auth, Postgres, RLS) |
-| IA | OpenAI (chat + function calling) |
-| Push | Web Push (VAPID) + Service Worker |
-| Hosting | Vercel |
-| Cron push | Railway (Python) |
-| Tests | Vitest |
-
----
-
-## Features actuales
-
-### ORC — Orquestador con 11 subagentes
-
-Un agente central (**Kore / ORC**) con personalidad calmada y contexto del hogar (energía familiar, hora, tareas pendientes). Delega en **11 subagentes especializados**:
-
-| Subagente | Dominio |
-|-----------|---------|
-| **Agenda** | Eventos del calendario familiar |
-| **Colegio** | Eventos escolares, materiales, sync con agenda |
-| **Compras** | Lista de la compra |
-| **Limpieza** | Tareas recurrentes por zona y frecuencia |
-| **Menú** | Planificación semanal de comidas |
-| **Sueño** | Sesiones de sueño, despertares, resúmenes |
-| **Tiempo libre** | Actividades y tiempo personal |
-| **Salud** | Registros de salud familiar |
-| **Corcho** | Notas y comunicación entre adultos |
-| **Economía** | Gastos y visión económica |
-| **Memoria** | `agent_memory` — hechos persistentes del hogar |
-
-Cada subagente expone **tools** OpenAI; el ORC elige cuándo invocarlas. Las server actions sensibles usan **service role** (`createAdminClient`) tras validar sesión, evitando bloqueos RLS en escrituras del servidor.
-
-### Lista de la compra
-
-Ítems con categoría, prioridad y estado completado. Gestión desde UI y desde el agente de Compras.
-
-### El Corcho
-
-Chat / notas asíncronas entre miembros del hogar (pareja, adultos). Subagente **Corcho** dedicado; UI en `CorchoChat` y modales relacionados.
-
-### Agenda familiar
-
-Calendario compartido (`calendar_events`). Los eventos de **Colegio** se sincronizan con la agenda al crearse o eliminarse.
-
-### Dominios (paneles en la app)
-
-Tarjetas de dominio con paneles dedicados donde aplica:
-
-- **Colegio** — eventos escolares, tipos, sync agenda
-- **Limpieza** — tareas recurrentes, vencidas / próximas
-- **Sueño** — sesiones, horas, despertares
-- **Compras** — lista de la compra
-- **Menú** — menú semanal
-- **Salud** — registros de salud
-- **Economía** — gastos
-- **Tiempo libre** — actividades
-
-*(Otros dominios se gestionan vía modales y agentes.)*
-
-### Multi-familia
-
-- Registro e inicio de sesión (Supabase Auth)
-- Onboarding por familia
-- Código de invitación para unirse al hogar
-- RLS: cada familia solo ve sus datos
-
-### Push notifications
-
-Web Push con VAPID; suscripciones en `push_subscriptions`. Endpoint `/api/push` protegido con `CRON_SECRET` para envíos desde cron (Railway).
-
-### Seguridad de datos
-
-- **RLS** en Supabase para acceso por `family_id`
-- Cliente anon en navegador; **service role** solo en servidor (actions, API, agentes) con validación de sesión previa
+<p align="center">
+  <img alt="Next.js 16.2.4" src="https://img.shields.io/badge/Next.js-16.2.4-black?logo=nextdotjs&logoColor=white" />
+  <img alt="React 19.2.4" src="https://img.shields.io/badge/React-19.2.4-149ECA?logo=react&logoColor=white" />
+  <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" />
+  <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white" />
+  <img alt="Supabase" src="https://img.shields.io/badge/Supabase-2-3FCF8E?logo=supabase&logoColor=white" />
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-6-412991?logo=openai&logoColor=white" />
+  <img alt="Vercel" src="https://img.shields.io/badge/Vercel-kore--ochre-000?logo=vercel&logoColor=white" />
+  <img alt="128 tests con Vitest" src="https://img.shields.io/badge/tests-128-4CC9A0?logo=vitest&logoColor=white" />
+</p>
 
 ---
 
-## Arquitectura
+## Por qué Kore
 
-### Vista general
+La vida en casa no cabe en un chat ni en cinco apps sueltas. Kore es una PWA donde la familia ve el día, deja recados y le pide a un orquestador que **actúe**: la compra, la cita, el cole o el menú se escriben en la base de datos del hogar.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  PWA (Next.js) — HomeClient, dominios, Corcho, agente       │
-└───────────────┬─────────────────────────────┬───────────────┘
-                │ Server Actions              │ /api/agent
-                ▼                             ▼
-┌───────────────────────────┐     ┌───────────────────────────┐
-│  lib/actions/*            │     │  ORC + 11 subagentes      │
-│  createAdminClient()      │     │  OpenAI function calling  │
-└───────────────┬───────────┘     └───────────────┬───────────┘
-                │                                 │
-                └──────────────┬──────────────────┘
-                               ▼
-                ┌──────────────────────────┐
-                │  Supabase (Postgres+RLS)  │
-                └──────────────────────────┘
-                               ▲
-                ┌──────────────┴───────────┐
-                │  Railway cron → /api/push │
-                └──────────────────────────┘
-```
+Cada familia tiene su espacio. La IA no inventa el estado de la casa: consulta y actualiza lo que ya está guardado.
 
-### Estructura de carpetas clave
+- Un solo sitio para el día, la casa y los recados.
+- Voz o texto: Kore ejecuta, no solo responde.
+- Los cambios se ven al momento, sin recargar.
 
-```
-kore/
-├── public/
-│   └── sw.js                 # Service Worker (push)
-├── src/
-│   ├── app/
-│   │   ├── page.tsx          # SSR inicial (datos de familia)
-│   │   ├── HomeClient.tsx    # Shell principal de la PWA
-│   │   ├── login/ register/ onboarding/
-│   │   └── api/
-│   │       ├── agent/        # POST — ORC + tools
-│   │       ├── push/         # POST — envío push (cron)
-│   │       └── transcribe/   # Audio → texto
-│   ├── components/
-│   │   ├── domain-panels/    # Colegio, Limpieza, Sueño…
-│   │   ├── CorchoChat/
-│   │   ├── AgentChat/
-│   │   └── …modales (Calendario, Salud, Economía…)
-│   ├── lib/
-│   │   ├── agents/           # orchestrator + 11 subagentes
-│   │   ├── actions/          # Server Actions por dominio
-│   │   ├── kore-db.ts        # Capa de acceso a datos
-│   │   ├── supabase/         # client, server, admin
-│   │   └── agent/            # Guardrails del ORC
-│   ├── types/
-│   │   └── database.ts       # Tipos generados Supabase
-│   └── __tests__/            # Vitest
-└── package.json
-```
+## Qué hace
 
-### Base de datos (tablas principales)
+Cuatro pestañas: **Inicio** (en escritorio, **Hoy**), **Casa**, **Corcho** y **Yo**, más el botón del orquestador.
 
-| Grupo | Tablas |
-|-------|--------|
-| **Núcleo** | `families`, `profiles`, `domains` |
-| **Agente** | `agent_memory`, `agent_messages`, `conversations`, `messages` |
-| **Agenda** | `calendar_events`, `school_events`, `school_materials` |
-| **Hogar** | `shopping_items`, `cleaning_tasks`, `menu_items`, `sleep_sessions`, `sleep_logs` |
-| **Bienestar** | `health_records`, `daily_metrics`, `leisure_activities` |
-| **Economía** | `expenses` |
-| **Corcho** | `kore_notes`, `kore_notifications` |
-| **Sistema** | `push_subscriptions`, `events_log`, `domain_history` |
+| | |
+|---|---|
+| 🏠 **Hoy** | Saludo, agenda del día y pendientes cortos (compra, limpieza). |
+| 🏡 **Casa** | Colegio, limpieza, sueño, compras, menú, salud, economía y tiempo libre. |
+| 📌 **Corcho** | Recados entre adultos. Vale una nota de solo texto o solo foto, hasta 6 JPEG. |
+| 🩺 **Salud** | Citas y medicación. Una cita crea, edita o borra el evento de agenda enlazado, así que aparece en Hoy. |
+| ✨ **ORC** | Un orquestador con **11 subagentes**. Escribes o hablas; las tools tocan la base de datos. |
+| ⚡ **Al momento** | Supabase Realtime y el evento local `kore-update` refrescan la UI en cuanto hay un cambio. |
+| 🔒 **Tu hogar** | Registro, onboarding e invitación por código. RLS cerrado por familia. `/api/transcribe` exige sesión antes de llamar a Whisper. |
+| 🔔 **Avisos** | Web Push (VAPID). Un cron externo llama a `/api/push` y, si hay algo relevante, envía el resumen del día. |
 
-Tipos en `src/types/database.ts`. Migraciones en `supabase/migrations/` (si están en el repo).
+## Instalar como PWA
 
-### Flujo del ORC y subagentes
+La app en producción es [kore-ochre.vercel.app](https://kore-ochre.vercel.app). El manifest usa `display: standalone`.
 
-1. El usuario escribe (o envía audio transcrito) → `POST /api/agent`.
-2. Se resuelve `familyId` y perfiles; se cargan memorias y snapshot (energía, tareas, etc.).
-3. OpenAI recibe el system prompt del ORC + tools de los 11 subagentes.
-4. Si el modelo pide una tool → `executeTool` enruta al subagente correcto.
-5. El subagente llama a `kore-db` con `createAdminClient()` cuando hace falta bypass RLS controlado.
-6. La respuesta vuelve al cliente; la UI puede refrescar vía `emitKoreUpdate`.
+1. Abre la URL en el móvil.
+2. **Android (Chrome):** menú → *Instalar aplicación* o *Añadir a pantalla de inicio*.
+3. **iPhone (Safari):** Compartir → *Añadir a pantalla de inicio*.
 
-Guardrails en `src/lib/agent/guardrails.ts` filtran planes de tools antes de ejecutar.
+En el escritorio, el navegador ofrece instalarla cuando el manifest y el service worker están activos.
 
 ---
 
-## Variables de entorno
+## Para quien mira el código
 
-Crea `.env.local` en la raíz (no commitear):
+Next.js 16.2.4 (App Router) · React 19.2.4 · TypeScript 5 · Tailwind CSS 4 · Supabase (`@supabase/supabase-js` ^2.105.1, Auth, Postgres, RLS, Storage) · OpenAI ^6.35.0 (chat y function calling) · Vitest ^4.1.5 · desplegado en Vercel.
+
+<details>
+<summary><strong>Arquitectura</strong></summary>
+
+```mermaid
+flowchart TB
+  PWA["PWA · Hoy, Casa, Corcho, Yo"]
+  Actions["Server Actions"]
+  API["/api/agent · /api/transcribe · /api/push"]
+  ORC["ORC + 11 subagentes"]
+  DB["Supabase · Postgres, Auth, RLS"]
+  Cron["Cron externo"]
+
+  PWA --> Actions
+  PWA --> API
+  Actions --> DB
+  API --> ORC
+  ORC --> DB
+  Cron -->|"x-cron-secret"| API
+```
+
+```
+src/
+├── app/                  # page, HomeClient, login, register, onboarding, admin
+│   └── api/              # agent, push, transcribe
+├── components/           # home/, domain-panels/, CorchoChat, AgentChat, modales
+├── lib/
+│   ├── agents/           # orchestrator + 11 subagentes
+│   ├── agent/            # guardrails del plan de tools
+│   ├── actions/          # Server Actions por dominio
+│   ├── kore-db.ts        # única capa de queries
+│   └── supabase/         # browser, server, admin
+└── __tests__/            # 24 archivos, 128 tests
+```
+
+Tres clientes de Supabase, cada uno en su sitio: el del navegador respeta RLS, el de servidor también, y `createAdminClient()` solo corre en servidor después de validar la sesión y el `familyId`.
+
+</details>
+
+<details>
+<summary><strong>ORC y 11 subagentes</strong></summary>
+
+`POST /api/agent` resuelve la familia, carga memoria y un snapshot del hogar, y llama a OpenAI con las tools de los 11 módulos de `src/lib/agents/`. `executeTool` enruta al subagente. Los [guardrails](src/lib/agent/guardrails.ts) filtran el plan antes de ejecutarlo: una mutación por dominio salvo listas explícitas, lecturas al final, y el evento escolar emparejado con la agenda.
+
+| Subagente | Se ocupa de |
+|-----------|-------------|
+| Agenda | Eventos del calendario familiar |
+| Colegio | Eventos escolares y material, sincronizados con la agenda |
+| Compras | Lista de la compra |
+| Limpieza | Tareas por zona y frecuencia |
+| Menú | Plan semanal de comidas |
+| Sueño | Sesiones, despertares y resumen |
+| Tiempo libre | Ocio y tiempo personal |
+| Salud | Citas y medicación; la cita queda enlazada a la agenda |
+| Corcho | Notas entre adultos |
+| Economía | Gastos del hogar |
+| Memoria | Hechos persistentes en `agent_memory` |
+
+El audio pasa por `POST /api/transcribe` (Whisper). Sin sesión familiar responde 401 y no llama al modelo.
+
+</details>
+
+<details>
+<summary><strong>Datos y seguridad</strong></summary>
+
+Tablas en Postgres (tipos generados en `src/types/database.ts`): `families`, `profiles`, `domains`, `calendar_events`, `school_events`, `school_materials`, `shopping_items`, `cleaning_tasks`, `menu_items`, `sleep_sessions`, `sleep_logs`, `health_records`, `daily_metrics`, `leisure_activities`, `expenses`, `kore_notes`, `kore_note_images`, `kore_notifications`, `agent_memory`, `agent_messages`, `conversations`, `messages`, `push_subscriptions`, `events_log`, `domain_history`.
+
+Las fotos del Corcho viven en Storage, con rutas firmadas y acotadas a la familia. La migración que cierra el RLS revoca el rol `anon` y deja el acceso por `get_my_family_id()`. El service role no sustituye esa regla: las escrituras del servidor comprueban antes la sesión.
+
+`/admin` solo se abre si el email de la sesión coincide con `KORE_ADMIN_EMAIL`.
+
+</details>
+
+<details>
+<summary><strong>Variables de entorno</strong></summary>
+
+Crea `.env.local` en la raíz. No hay `.env.example` en el repo. Las mismas claves van en Vercel (Production y Preview). Nada sin prefijo `NEXT_PUBLIC_` llega al navegador.
 
 ```env
-# Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 
-# OpenAI
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY=
 
-# Web Push (VAPID)
-NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
-VAPID_PRIVATE_KEY=...
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:tu@email.com
 
-# Cron (Railway → /api/push)
-CRON_SECRET=un-secreto-largo-aleatorio
+CRON_SECRET=
 ```
 
 | Variable | Uso |
 |----------|-----|
-| `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Cliente en navegador (RLS) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server actions, API, agentes |
-| `OPENAI_API_KEY` | ORC y subagentes |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Suscripción push en cliente |
-| `VAPID_PRIVATE_KEY` | Firma de notificaciones en servidor |
+| `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Cliente del navegador, con RLS |
+| `SUPABASE_SERVICE_ROLE_KEY` | Actions, API y agentes. Solo servidor |
+| `OPENAI_API_KEY` | ORC, subagentes y Whisper |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Alta de la suscripción push |
+| `VAPID_PRIVATE_KEY` | Firma de las notificaciones |
 | `VAPID_SUBJECT` | Contacto VAPID (`mailto:` o URL de la app) |
 | `CRON_SECRET` | Header `x-cron-secret` en `/api/push` |
+| `KORE_ADMIN_EMAIL` | Quién puede entrar en `/admin` |
+| `NEXT_PUBLIC_KORE_ADMIN_EMAIL` | Muestra el enlace de admin en Yo |
 
-Replica las mismas variables en **Vercel** (Production / Preview).
+Opcional, solo para el aviso de sueño (`supabase/functions/kore-sleep-check`): `PUSHOVER_API_TOKEN` y `PUSHOVER_USER_KEY`.
 
----
+</details>
 
-## Cómo arrancar en local
+<details>
+<summary><strong>Arranque local</strong></summary>
 
 ```bash
-# 1. Clonar e instalar
-git clone <repo-url>
+git clone https://github.com/adopico83/kore.git
 cd kore
 npm install
-
-# 2. Variables de entorno
-cp .env.example .env.local   # o crea .env.local a mano
-# Rellena todas las variables de la sección anterior
-
-# 3. Desarrollo
+# crea .env.local con las variables de arriba
 npm run dev
 ```
 
-Abre [http://localhost:3000](http://localhost:3000). Para push en local necesitas HTTPS o un túnel; en iOS la PWA se prueba mejor en dispositivo con build desplegado.
+Abre [http://localhost:3000](http://localhost:3000).
 
-### Scripts útiles
-
-| Comando | Descripción |
-|---------|-------------|
+| Comando | Qué hace |
+|---------|----------|
 | `npm run dev` | Servidor de desarrollo |
-| `npm run build` | Build de producción + typecheck |
-| `npm run start` | Servir build |
-| `npm test` | Vitest (watch) |
-| `npm run test:run` | Vitest una sola pasada |
+| `npm run build` | Build de producción |
+| `npm run start` | Sirve el build |
+| `npm test` | Vitest en watch |
+| `npm run test:run` | Vitest, una pasada |
 | `npm run lint` | ESLint |
 
----
+La suite de Vitest incluye `src/**/*.{test,spec}.{ts,tsx}`: **128 tests en 24 archivos** (agente, guardrails, Corcho, salud↔agenda, hogar, push y admin).
 
-## Tests
+</details>
 
-```bash
-npm test
-# o
-npm run test:run
-```
-
-Suite con **Vitest**: API del agente, guardrails, utilidades y componentes críticos.
-
-**Estado actual: 63 tests en verde** (12 archivos).
-
----
-
-## Despliegue
+<details>
+<summary><strong>Despliegue</strong></summary>
 
 | Servicio | Rol |
 |----------|-----|
-| **Vercel** | Frontend Next.js, API routes (`/api/agent`, `/api/push`, `/api/transcribe`) |
-| **Supabase** | Postgres, Auth, RLS, storage si aplica |
-| **Railway** | Cron en Python que llama a `POST /api/push` con `x-cron-secret` para notificaciones programadas |
+| **Vercel** | App Next.js y rutas `/api/agent`, `/api/push`, `/api/transcribe`. Producción: [kore-ochre.vercel.app](https://kore-ochre.vercel.app) |
+| **Supabase** | Postgres, Auth, RLS, Storage del Corcho y la función `kore-sleep-check` |
+| **Cron externo** | `POST /api/push` con `x-cron-secret` para el resumen diario |
 
-Flujo típico: push a `main` → Vercel despliega automáticamente. Variables de entorno en el dashboard de Vercel. Service role **nunca** en el cliente.
+Un push a `main` despliega en Vercel. El service role no sale del servidor.
 
----
+</details>
 
-## Roadmap
+## Autor
 
-- [ ] **Notificaciones inteligentes** — contexto (sueño, limpieza, colegio) en lugar de push genéricos
-- [ ] **Memoria predictiva del ORC** — anticipar necesidades desde `agent_memory` y patrones
-- [ ] **Panel de admin** — familias, métricas, soporte
-- [ ] **Stripe** — planes y límites por familia
-
----
+[adopico83](https://github.com/adopico83) · [LinkedIn](https://linkedin.com/in/ander-dopico)
 
 ## Licencia
 
-Proyecto privado. Consulta con los mantenedores antes de redistribuir.
+Código visible con fines de portfolio. Todos los derechos reservados; escríbeme si quieres usarlo.
 
 ---
 
-*Kore no sustituye el criterio de la familia: lo amplifica. Menos carga mental, más calma en casa.*
+<p align="center"><em>Kore no sustituye el criterio de la familia: lo amplifica.</em></p>
