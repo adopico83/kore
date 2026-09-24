@@ -127,9 +127,15 @@ export function QuickInput() {
     const res = await fetch("/api/transcribe", {
       method: "POST",
       body: formData,
+      credentials: "same-origin",
     });
 
     const data = (await res.json()) as { text?: string; texto?: string; error?: string };
+    if (res.status === 401) {
+      setErrorMessage("Tu sesión ha caducado. Vuelve a entrar para usar la voz.");
+      setState("error");
+      return;
+    }
     const transcribed = (data.texto ?? data.text ?? "").trim();
 
     if (!res.ok || !transcribed) {

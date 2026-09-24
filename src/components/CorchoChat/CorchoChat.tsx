@@ -313,8 +313,17 @@ export function CorchoChat({
     try {
       const formData = new FormData();
       formData.append("audio", audioBlob, "audio.webm");
-      const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+      const res = await fetch("/api/transcribe", {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin",
+      });
       const data = (await res.json().catch(() => ({}))) as { texto?: string; text?: string; error?: string };
+      if (res.status === 401) {
+        setTranscribiendo(false);
+        setError("Tu sesión ha caducado. Vuelve a entrar para usar la voz.");
+        return;
+      }
       if (!res.ok) {
         setTranscribiendo(false);
         setError(data.error?.trim() || "Error al transcribir");

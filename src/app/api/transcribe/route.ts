@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
+import { requireFamilySession } from "@/lib/require-family-session";
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireFamilySession();
+    if (!session.ok) return session.response;
+
     const formData = await request.formData();
     const audioBlob = formData.get("audio");
 

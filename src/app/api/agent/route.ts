@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import { applyGuardrails, type PlannedTool } from "@/lib/agent/guardrails";
 import { allTools, buildSystemPrompt, executeTool } from "@/lib/agents/orchestrator";
 import type { AgentExecutionContext } from "@/lib/agents/agent-execution-context";
-import { getScopedFamilyId, getScopedUserId } from "@/lib/family-context";
+import { getScopedUserId } from "@/lib/family-context";
 import {
   getAgentMemory,
   getPendingCleaningTasks,
@@ -12,6 +12,7 @@ import {
   getShoppingItems,
   type Profile,
 } from "@/lib/kore-db";
+import { requireFamilySession } from "@/lib/require-family-session";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const openai = new OpenAI({
@@ -266,10 +267,9 @@ No redactes respuesta al usuario.
 
 export async function POST(request: NextRequest) {
   try {
-    const familyId = await getScopedFamilyId();
-    if (!familyId) {
-      return new Response(JSON.stringify({ error: "No tienes una familia asignada" }), { status: 401 });
-    }
+    const session = await requireFamilySession();
+    if (!session.ok) return session.response;
+    const familyId = session.familyId;
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
